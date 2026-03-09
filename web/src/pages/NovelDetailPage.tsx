@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Isaac.X.Ω.Yuan
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Globe, Pencil, PenTool, Trash2, Upload } from 'lucide-react'
@@ -11,6 +11,7 @@ import { ChapterSidebar } from '@/components/detail/ChapterSidebar'
 import { EmptyWorldOnboarding } from '@/components/detail/EmptyWorldOnboarding'
 import { PageShell } from '@/components/layout/PageShell'
 import { NwButton } from '@/components/ui/nw-button'
+import { getLlmApiErrorMessage } from '@/lib/llmErrorMessages'
 import { api, ApiError } from '@/services/api'
 import { novelKeys } from '@/hooks/novel/keys'
 import { useUpdateChapter } from '@/hooks/novel/useUpdateChapter'
@@ -26,6 +27,10 @@ import { downloadTextFile } from '@/lib/downloadTextFile'
 import { formatChapterLabel, serializeChaptersToPlainText, stripLeadingChapterHeading } from '@/lib/chaptersPlainText'
 import { useDebouncedAutoSave } from '@/hooks/useDebouncedAutoSave'
 import { dismissWorldOnboarding, isWorldOnboardingDismissed } from '@/lib/worldOnboardingStorage'
+import { getActiveWarnings, setActiveWarnings } from '@/lib/postcheckActiveWarningsStorage'
+import { getWhitelist, addToWhitelist } from '@/lib/postcheckWhitelistStorage'
+import { DriftWarningPopover } from '@/components/generation/DriftWarningPopover'
+import type { TextAnnotation } from '@/components/ui/plain-text-content'
 import type { BootstrapStatus } from '@/types/api'
 
 function countWords(text: string): number {
@@ -106,6 +111,46 @@ export function NovelDetailPage() {
 
   const currentMeta = chaptersMeta.find(c => c.chapter_number === activeChapterNum)
 
+  // ── Postcheck drift annotations (carried over from generation results) ──
+  const [driftWhitelist, setDriftWhitelist] = useState<string[]>(() => getWhitelist(novelId))
+
+  const handleDismissDriftTerm = useCallback((term: string) => {
+    addToWhitelist(novelId, term)
+    setDriftWhitelist(prev => [...prev, term])
+  }, [novelId])
+
+  // Active warnings for this chapter (used in both read and edit mode)
+  const activeChapterWarnings = (() => {
+    if (activeChapterNum === null) return []
+    return getActiveWarnings(novelId, activeChapterNum, currentMeta?.created_at)
+      .filter(w => !driftWhitelist.includes(w.term))
+  })()
+
+  // Read-mode: full annotations with popovers
+  const chapterDriftAnnotations: TextAnnotation[] = (() => {
+    if (editMode || activeChapterWarnings.length === 0) return []
+    return activeChapterWarnings.map(w => ({
+      id: `drift-${w.code}-${w.term}`,
+      term: w.term,
+      className: 'nw-drift-highlight',
+      renderPopover: ({ onClose }: { onClose: () => void }) => (
+        <DriftWarningPopover
+          code={w.code}
+          term={w.term}
+          onDismiss={() => {
+            handleDismissDriftTerm(w.term)
+            onClose()
+          }}
+        />
+      ),
+    }))
+  })()
+
+  // Edit-mode: compact term list for the editor banner
+  const editorWarningTerms = editMode && activeChapterWarnings.length > 0
+    ? activeChapterWarnings.map(w => ({ code: w.code, term: w.term }))
+    : undefined
+
   const filteredChapters = (() => {
     if (!searchQuery.trim()) return chaptersMeta
     const q = searchQuery.toLowerCase()
@@ -168,6 +213,8 @@ export function NovelDetailPage() {
     deleteChapter.mutate(activeChapterNum, {
       onSuccess: () => {
         cancelAutoSave()
+        // Clean up persisted drift warnings for the deleted chapter
+        setActiveWarnings(novelId, activeChapterNum, [])
         const idx = chaptersMeta.findIndex(c => c.chapter_number === activeChapterNum)
         const next = chaptersMeta[idx + 1] ?? chaptersMeta[idx - 1]
         setSelectedChapterNum(next?.chapter_number ?? null)
@@ -206,6 +253,11 @@ export function NovelDetailPage() {
       {
         onError: (err) => {
           if (err instanceof ApiError) {
+            const llmMessage = getLlmApiErrorMessage(err)
+            if (llmMessage) {
+              setBootstrapError(llmMessage)
+              return
+            }
             if (err.code === 'bootstrap_already_running') {
               setBootstrapError(LABELS.BOOTSTRAP_SCANNING)
               return
@@ -395,11 +447,13 @@ export function NovelDetailPage() {
                   onRedo={handleRedo}
                   onCancel={handleCancelEdit}
                   onSave={handleSave}
+                  warningTerms={editorWarningTerms}
               />
             ) : (
               <ChapterContent
                 isLoading={chapterLoading}
                 content={chapter?.content ?? null}
+                annotations={chapterDriftAnnotations}
               />
             )}
           </div>

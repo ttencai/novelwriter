@@ -1,12 +1,14 @@
 import { GlassCard } from '@/components/GlassCard'
-import { PlainTextContent } from '@/components/ui/plain-text-content'
+import { PlainTextContent, type TextAnnotation } from '@/components/ui/plain-text-content'
 
 export function ChapterContent({
   isLoading,
   content,
+  annotations,
 }: {
   isLoading: boolean
   content: string | null
+  annotations?: TextAnnotation[]
 }) {
   return (
     <GlassCard className="flex-1 overflow-auto rounded-xl p-6 sm:p-8 nw-scrollbar-thin">
@@ -17,6 +19,7 @@ export function ChapterContent({
         emptyLabel="选择一个章节开始阅读"
         maxWidth
         contentClassName="space-y-6"
+        annotations={annotations}
       />
     </GlassCard>
   )

@@ -115,6 +115,14 @@
 }
 
 @layer utilities {
+  /* Drift annotation highlight — blue wash, adaptive to theme. */
+  .nw-drift-highlight {
+    background: hsl(217 91% 60% / 0.25);
+  }
+  .light .nw-drift-highlight {
+    background: hsl(217 91% 60% / 0.15);
+  }
+
   /* Tailwind line-clamp plugin is not enabled; keep this utility local and explicit. */
   .nw-line-clamp-2 {
     display: -webkit-box;

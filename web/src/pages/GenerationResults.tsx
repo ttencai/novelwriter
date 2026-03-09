@@ -1,21 +1,25 @@
 // SPDX-FileCopyrightText: 2026 Isaac.X.Ω.Yuan
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Link, useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
 import { ArrowLeft, Check, RefreshCw, Upload, Info, ChevronDown, ChevronRight, Loader2, Settings, MessageSquarePlus } from 'lucide-react'
 import { GlassCard } from '@/components/GlassCard'
 import { PageShell } from '@/components/layout/PageShell'
 import { NwButton } from '@/components/ui/nw-button'
-import { PlainTextContent } from '@/components/ui/plain-text-content'
+import { PlainTextContent, type TextAnnotation } from '@/components/ui/plain-text-content'
 import { InjectionSummaryModal } from '@/components/workspace/InjectionSummaryModal'
 import { FeedbackForm, type FeedbackAnswers } from '@/components/feedback/FeedbackForm'
+import { DriftWarningPopover } from '@/components/generation/DriftWarningPopover'
+import { getWhitelist, addToWhitelist } from '@/lib/postcheckWhitelistStorage'
+import { setActiveWarnings } from '@/lib/postcheckActiveWarningsStorage'
+import { getLlmApiErrorMessage } from '@/lib/llmErrorMessages'
 import { api, streamContinuation, ApiError } from '@/services/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { downloadTextFile } from '@/lib/downloadTextFile'
 import { cn } from '@/lib/utils'
-import type { ContinueDebugSummary, ContinueRequest, ContinueResponse, Continuation } from '@/types/api'
+import type { ContinueDebugSummary, ContinueRequest, ContinueResponse, Continuation, PostcheckWarning } from '@/types/api'
 
 interface VariantState {
   content: string
@@ -85,6 +89,53 @@ export function GenerationResults() {
   const isLegacyMode = !isStreamMode && nonStreamVersions.length > 0
   const isReloadMode = !isStreamMode && legacyVersions.length === 0 && !!persisted
 
+  // ── Postcheck: reload-safe warnings (sessionStorage) ──
+  const [reloadedWarnings, setReloadedWarnings] = useState<PostcheckWarning[]>([])
+
+  // ── Postcheck drift annotations ────────────────────────────────────
+  const numericNovelId = novelId ? Number(novelId) : 0
+  const [whitelist, setWhitelist] = useState<string[]>(() => getWhitelist(numericNovelId))
+
+  const handleDismissTerm = useCallback((term: string) => {
+    if (!numericNovelId) return
+    addToWhitelist(numericNovelId, term)
+    setWhitelist(prev => [...prev, term])
+  }, [numericNovelId])
+
+  const driftAnnotations: TextAnnotation[] = useMemo(() => {
+    // Source priority: stream > legacy > reload (sessionStorage)
+    let warnings: PostcheckWarning[] | undefined
+    if (isStreamMode) {
+      if (!isDone) return []
+      warnings = streamDebug?.postcheck_warnings
+    } else if (legacyResponse?.debug?.postcheck_warnings?.length) {
+      warnings = legacyResponse.debug.postcheck_warnings
+    } else if (reloadedWarnings.length > 0) {
+      warnings = reloadedWarnings
+    }
+    if (!warnings?.length) return []
+
+    // Filter by active variant (version is 1-indexed, activeTab is 0-indexed)
+    const targetVersion = activeTab + 1
+    return warnings
+      .filter(w => (w.version == null || w.version === targetVersion) && !whitelist.includes(w.term))
+      .map(w => ({
+        id: `drift-${w.code}-${w.term}`,
+        term: w.term,
+        className: 'nw-drift-highlight',
+        renderPopover: ({ onClose }: { onClose: () => void }) => (
+          <DriftWarningPopover
+            code={w.code}
+            term={w.term}
+            onDismiss={() => {
+              handleDismissTerm(w.term)
+              onClose()
+            }}
+          />
+        ),
+      }))
+  }, [isStreamMode, streamDebug, legacyResponse?.debug, isDone, activeTab, whitelist, handleDismissTerm, reloadedWarnings])
+
   useEffect(() => {
     if (!streamCtx) return
 
@@ -150,13 +201,24 @@ export function GenerationResults() {
 
             case 'done': {
               setIsDone(true)
-              if ('debug' in event) setStreamDebug((event as unknown as { debug: ContinueDebugSummary }).debug)
+              const doneDebug = 'debug' in event ? (event as unknown as { debug: ContinueDebugSummary }).debug : null
+              if (doneDebug) setStreamDebug(doneDebug)
 
               const total = totalVariantsRef.current
               const entries = Array.from(continuationMapRef.current.entries()).sort((a, b) => a[0] - b[0])
               const mapping = entries.map(([v, id]) => `${v}:${id}`).join(',')
 
               if (mapping && total) {
+                // Persist warnings to sessionStorage for reload recovery
+                if (doneDebug?.postcheck_warnings?.length) {
+                  try {
+                    sessionStorage.setItem(
+                      `novwr_gen_warnings_${mapping}`,
+                      JSON.stringify(doneDebug.postcheck_warnings),
+                    )
+                  } catch { /* ignore */ }
+                }
+
                 const params = new URLSearchParams()
                 params.set('continuations', mapping)
                 params.set('total_variants', String(total))
@@ -189,8 +251,15 @@ export function GenerationResults() {
         if (err instanceof ApiError && err.status === 429) {
           setIsQuotaExhausted(true)
           setStreamError('生成额度已用完')
-        } else if (err instanceof ApiError && err.status === 503) {
-          setStreamError('当前使用人数较多，请稍后再试')
+        } else if (err instanceof ApiError) {
+          const llmMessage = getLlmApiErrorMessage(err)
+          if (llmMessage) {
+            setStreamError(llmMessage)
+          } else if (err.status === 503) {
+            setStreamError('当前使用人数较多，请稍后再试')
+          } else {
+            setStreamError(`请求失败（HTTP ${err.status}）`)
+          }
         } else {
           setStreamError(err instanceof Error ? err.message : 'Stream failed')
         }
@@ -209,6 +278,20 @@ export function GenerationResults() {
   useEffect(() => {
     if (!isReloadMode) return
     if (!persisted || !novelId) return
+
+    // Restore warnings from sessionStorage (saved during stream completion)
+    try {
+      const raw = sessionStorage.getItem(`novwr_gen_warnings_${persisted}`)
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          setReloadedWarnings(parsed.filter(
+            (v: unknown): v is PostcheckWarning =>
+              v != null && typeof v === 'object' && typeof (v as PostcheckWarning).code === 'string' && typeof (v as PostcheckWarning).term === 'string',
+          ))
+        }
+      }
+    } catch { /* ignore */ }
 
     const pairs = persisted.split(',').map(p => p.trim()).filter(Boolean)
     const byVariant = new Map<number, number>()
@@ -250,7 +333,19 @@ export function GenerationResults() {
         content: currentContent,
       })
     },
-    onSuccess: () => {
+    onSuccess: (chapter) => {
+      // Persist active drift warnings for the newly created chapter
+      const debug = isStreamMode ? streamDebug : legacyResponse?.debug
+      const allWarnings = debug?.postcheck_warnings ?? (reloadedWarnings.length > 0 ? reloadedWarnings : undefined)
+      if (allWarnings?.length) {
+        const targetVersion = activeTab + 1
+        const activeWarnings = allWarnings.filter(
+          w => (w.version == null || w.version === targetVersion) && !whitelist.includes(w.term),
+        )
+        if (activeWarnings.length > 0) {
+          setActiveWarnings(numericNovelId, chapter.chapter_number, activeWarnings, chapter.created_at)
+        }
+      }
       navigate(`/novel/${novelId}`)
     },
   })
@@ -598,6 +693,7 @@ export function GenerationResults() {
                 content={currentVariant.content}
                 className="flex-1 min-h-0 overflow-y-auto nw-scrollbar-thin"
                 emptyLabel={'\u6682\u65e0\u5185\u5bb9'}
+                annotations={driftAnnotations}
               />
             ) : currentVariant.isStreaming || !currentVariant.continuationId ? (
               <div className="flex-1 min-h-0 flex items-center justify-center">
@@ -615,6 +711,7 @@ export function GenerationResults() {
               content={currentLegacyVersion?.content}
               className="flex-1 min-h-0 overflow-y-auto nw-scrollbar-thin"
               emptyLabel={'\u6682\u65e0\u5185\u5bb9'}
+              annotations={driftAnnotations}
             />
           )}
 
