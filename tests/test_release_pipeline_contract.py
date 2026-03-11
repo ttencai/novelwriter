@@ -38,6 +38,7 @@ def test_hosted_deploy_script_keeps_healthcheck_and_metadata_contract():
     script = _read("scripts/deploy_hosted.sh")
 
     assert "http://localhost:8000/api/health" in script
+    assert "NOVWR_HEALTHCHECK_RETRIES" in script
     assert "last-success.env" in script
     assert "current-sha.txt" in script
     assert "systemctl restart novwr" in script
