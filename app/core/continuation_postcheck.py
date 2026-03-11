@@ -165,6 +165,8 @@ def postcheck_continuation(
                 PostcheckWarning(
                     code=code,
                     term=term,
+                    message_key=f"continuation.postcheck.warning.{code}",
+                    message_params={"term": term},
                     message=(
                         "Potential lore drift / invented naming: "
                         f"term '{term}' not found in World Context, recent chapters, or user instruction."

@@ -579,7 +579,7 @@ class TestSystemAPI:
             "name": "修炼体系", "display_type": "hierarchy",
         })
         client.post(f"/api/novels/{novel.id}/world/systems", json={
-            "name": "势力格局", "display_type": "graph",
+            "name": "历史年表", "display_type": "timeline",
         })
 
         resp = client.get(f"/api/novels/{novel.id}/world/systems")
@@ -593,11 +593,11 @@ class TestSystemAPI:
         ).json()
         confirmed = client.post(
             f"/api/novels/{novel.id}/world/systems",
-            json={"name": "势力格局", "display_type": "graph"},
+            json={"name": "历史年表", "display_type": "timeline"},
         ).json()
         client.post(f"/api/novels/{novel.id}/world/systems/confirm", json={"ids": [confirmed["id"]]})
 
-        resp = client.get(f"/api/novels/{novel.id}/world/systems", params={"q": "势力"})
+        resp = client.get(f"/api/novels/{novel.id}/world/systems", params={"q": "历史"})
         assert [s["id"] for s in resp.json()] == [confirmed["id"]]
 
         resp = client.get(f"/api/novels/{novel.id}/world/systems", params={"status": "confirmed"})
@@ -730,10 +730,102 @@ class TestSystemAPI:
 
         resp = client.put(
             f"/api/novels/{novel.id}/world/systems/{created['id']}",
-            json={"display_type": "graph"},
+            json={"display_type": "timeline"},
         )
         assert resp.status_code == 200
-        assert resp.json()["display_type"] == "graph"
+        assert resp.json()["display_type"] == "timeline"
+
+    def test_create_system_rejects_removed_graph_display_type(self, client, novel):
+        resp = client.post(
+            f"/api/novels/{novel.id}/world/systems",
+            json={"name": "势力格局", "display_type": "graph"},
+        )
+        assert resp.status_code == 422
+
+    def test_list_systems_keeps_legacy_graph_rows_readable(self, client, novel, db):
+        from app.models import WorldSystem
+
+        db.add(
+            WorldSystem(
+                novel_id=novel.id,
+                name="势力格局",
+                display_type="graph",
+                data={
+                    "nodes": [
+                        {"id": "cf", "label": "苍风帝国", "visibility": "active"},
+                        {"id": "ly", "label": "流云宗", "visibility": "reference"},
+                    ],
+                    "edges": [
+                        {"from": "cf", "to": "ly", "label": "附属", "visibility": "active"},
+                    ],
+                },
+                constraints=["旧版图结构"],
+                status="confirmed",
+            )
+        )
+        db.commit()
+
+        resp = client.get(f"/api/novels/{novel.id}/world/systems")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["display_type"] == "graph"
+        assert data[0]["data"]["nodes"][0]["label"] == "苍风帝国"
+
+    def test_update_legacy_graph_system_metadata_without_touching_graph_data(self, client, novel, db):
+        from app.models import WorldSystem
+
+        system = WorldSystem(
+            novel_id=novel.id,
+            name="势力格局",
+            display_type="graph",
+            data={
+                "nodes": [{"id": "cf", "label": "苍风帝国", "visibility": "active"}],
+                "edges": [],
+            },
+            constraints=["旧版图结构"],
+            status="confirmed",
+        )
+        db.add(system)
+        db.commit()
+        db.refresh(system)
+
+        resp = client.put(
+            f"/api/novels/{novel.id}/world/systems/{system.id}",
+            json={"name": "新版势力格局", "visibility": "hidden"},
+        )
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["name"] == "新版势力格局"
+        assert payload["visibility"] == "hidden"
+        assert payload["display_type"] == "graph"
+        assert payload["data"] == {
+            "nodes": [{"id": "cf", "label": "苍风帝国", "visibility": "active"}],
+            "edges": [],
+        }
+
+    def test_get_legacy_graph_system_detail(self, client, novel, db):
+        from app.models import WorldSystem
+
+        system = WorldSystem(
+            novel_id=novel.id,
+            name="势力格局",
+            display_type="graph",
+            data={
+                "nodes": [{"id": "cf", "label": "苍风帝国", "visibility": "active"}],
+                "edges": [{"from": "cf", "to": "cf", "label": "自环", "visibility": "reference"}],
+            },
+            status="confirmed",
+        )
+        db.add(system)
+        db.commit()
+        db.refresh(system)
+
+        resp = client.get(f"/api/novels/{novel.id}/world/systems/{system.id}")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["display_type"] == "graph"
+        assert payload["data"]["edges"][0]["label"] == "自环"
 
     def test_update_system_unknown_display_type_returns_422(self, client, novel, db):
         from app.models import WorldSystem
@@ -758,7 +850,7 @@ class TestSystemAPI:
     def test_list_systems_rejects_invalid_display_type_filter(self, client, novel):
         resp = client.get(
             f"/api/novels/{novel.id}/world/systems",
-            params={"display_type": "bogus"},
+            params={"display_type": "graph"},
         )
         assert resp.status_code == 422
 

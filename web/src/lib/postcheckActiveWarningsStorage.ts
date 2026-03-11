@@ -1,4 +1,5 @@
 import type { PostcheckWarning } from '@/types/api'
+import { normalizePostcheckWarning } from '@/lib/postcheckWarnings'
 
 const KEY_PREFIX = 'novwr_postcheck_active_'
 
@@ -6,10 +7,6 @@ function storageKey(novelId: number, chapterNumber: number): string | null {
   if (!Number.isFinite(novelId) || novelId <= 0) return null
   if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) return null
   return `${KEY_PREFIX}${novelId}_${chapterNumber}`
-}
-
-function isValidWarning(v: unknown): v is PostcheckWarning {
-  return v != null && typeof v === 'object' && typeof (v as PostcheckWarning).code === 'string' && typeof (v as PostcheckWarning).term === 'string'
 }
 
 /**
@@ -37,7 +34,7 @@ export function getActiveWarnings(
         return []
       }
       if (!Array.isArray(stored.warnings)) return []
-      return stored.warnings.filter(isValidWarning)
+      return stored.warnings.map(normalizePostcheckWarning).filter((warning): warning is PostcheckWarning => warning != null)
     }
 
     // Legacy format (bare array) — can't validate freshness, discard

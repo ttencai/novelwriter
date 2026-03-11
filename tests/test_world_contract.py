@@ -488,7 +488,7 @@ class TestSystemCRUD:
     def test_all_display_types_roundtrip(self, client, novel):
         base = f"/api/novels/{novel.id}/world/systems"
         cases = {
-            "graph": {"nodes": [{"id": "a", "label": "X", "position": {"x": 0, "y": 0}}], "edges": []},
+            "hierarchy": {"nodes": [{"id": "a", "label": "X", "children": []}]},
             "timeline": {"events": [{"time": "千年前", "label": "魔法消失"}]},
             "list": {"items": [{"label": "规则一"}]},
         }

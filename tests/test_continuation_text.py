@@ -77,3 +77,23 @@ def test_format_world_context_for_prompt_renders_sections_without_constraints_in
     assert "身份：苍风弟子" in result
     assert "云澈 —师徒→ 楚月仙：云澈拜楚月仙为师" in result
     assert "每章最多一次时间跳转" not in result
+
+
+def test_format_world_context_for_prompt_renders_timeline_time_field():
+    writer_ctx = {
+        "systems": [
+            {
+                "name": "历史年表",
+                "display_type": "timeline",
+                "description": "关键节点",
+                "data": {"events": [{"time": "千年前", "label": "灵气衰退", "description": "大灾变"}]},
+                "constraints": [],
+            }
+        ],
+        "entities": [],
+        "relationships": [],
+    }
+
+    result = format_world_context_for_prompt(writer_ctx)
+
+    assert "千年前，灵气衰退：大灾变" in result

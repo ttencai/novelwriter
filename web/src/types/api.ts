@@ -49,6 +49,8 @@ export interface PostcheckWarning {
   code: string
   term: string
   message: string
+  message_key: string
+  message_params: Record<string, string | number | boolean | null>
   version: number | null
   evidence: string | null
 }
@@ -80,7 +82,8 @@ export interface ContinueResponse {
 // World Model Types
 export type Visibility = 'active' | 'reference' | 'hidden'
 export type EntityStatus = 'draft' | 'confirmed'
-export type SystemDisplayType = 'hierarchy' | 'graph' | 'timeline' | 'list'
+export type SystemDisplayType = 'hierarchy' | 'timeline' | 'list'
+export type LegacySystemDisplayType = SystemDisplayType | 'graph'
 export type WorldOrigin = 'manual' | 'bootstrap' | 'worldpack' | 'worldgen'
 
 export interface WorldEntity {
@@ -135,7 +138,7 @@ export interface WorldSystem {
   id: number
   novel_id: number
   name: string
-  display_type: SystemDisplayType
+  display_type: LegacySystemDisplayType
   description: string
   data: Record<string, unknown>
   constraints: string[]
@@ -154,6 +157,8 @@ export interface WorldGenerateRequest {
 export interface WorldGenerateWarning {
   code: string
   message: string
+  message_key: string
+  message_params: Record<string, string | number | boolean | null>
   path?: string | null
 }
 
@@ -291,6 +296,8 @@ export interface WorldpackImportCounts {
 export interface WorldpackImportWarning {
   code: string
   message: string
+  message_key: string
+  message_params: Record<string, string | number | boolean | null>
   path?: string | null
 }
 

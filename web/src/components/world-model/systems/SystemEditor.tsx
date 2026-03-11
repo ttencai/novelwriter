@@ -1,14 +1,19 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { InlineEdit } from '@/components/world-model/shared/InlineEdit'
 import { VisibilityDot } from '@/components/world-model/shared/VisibilityDot'
 import { ConstraintsPanel } from '@/components/world-model/systems/ConstraintsPanel'
 import { HierarchyEditor } from '@/components/world-model/systems/HierarchyEditor'
-import { GraphEditor } from '@/components/world-model/systems/GraphEditor'
+import { LegacyGraphReadonly } from '@/components/world-model/systems/LegacyGraphReadonly'
 import { TimelineEditor } from '@/components/world-model/systems/TimelineEditor'
 import { ListEditor } from '@/components/world-model/systems/ListEditor'
 import { useUpdateSystem, useDeleteSystem } from '@/hooks/world/useSystems'
 import { LABELS } from '@/constants/labels'
+import { isLegacyGraphDisplayType } from '@/lib/worldSystemDisplay'
 import type { WorldSystem } from '@/types/api'
+
+type HierarchyEditorData = Parameters<typeof HierarchyEditor>[0]['data']
+type TimelineEditorData = Parameters<typeof TimelineEditor>[0]['data']
+type ListEditorData = Parameters<typeof ListEditor>[0]['data']
 
 export function SystemEditor({ novelId, system, onBack }: {
   novelId: number
@@ -23,14 +28,26 @@ export function SystemEditor({ novelId, system, onBack }: {
     updateSystem.mutate({ systemId: system.id, data: patch })
   }
 
-  const saveData = (data: Record<string, unknown>) => save({ data })
-
-  const Editor = {
-    hierarchy: HierarchyEditor,
-    graph: GraphEditor,
-    timeline: TimelineEditor,
-    list: ListEditor,
-  }[system.display_type]
+  const saveData = <T extends object>(data: T) => {
+    save({ data: data as unknown as Record<string, unknown> })
+  }
+  const isLegacyGraph = isLegacyGraphDisplayType(system.display_type)
+  let editorContent: ReactNode
+  if (isLegacyGraph) {
+    editorContent = <LegacyGraphReadonly data={system.data} />
+  } else if (system.display_type === 'hierarchy') {
+    editorContent = <HierarchyEditor data={system.data as unknown as HierarchyEditorData} onUpdate={saveData} />
+  } else if (system.display_type === 'timeline') {
+    editorContent = <TimelineEditor data={system.data as unknown as TimelineEditorData} onUpdate={saveData} />
+  } else if (system.display_type === 'list') {
+    editorContent = <ListEditor data={system.data as unknown as ListEditorData} onUpdate={saveData} />
+  } else {
+    editorContent = (
+      <div className="rounded-2xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] px-4 py-3 text-sm text-muted-foreground">
+        当前体系类型无法编辑，请检查数据是否已经迁移。
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-8 py-8 space-y-4" data-testid="system-editor">
@@ -61,8 +78,7 @@ export function SystemEditor({ novelId, system, onBack }: {
             onMouseLeave={() => setConfirmDelete(false)}
           >{confirmDelete ? LABELS.SYSTEM_DELETE_CONFIRM : LABELS.SYSTEM_DELETE}</button>
         </div>
-        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-        <Editor data={system.data as any} onUpdate={saveData as any} />
+        {editorContent}
         <ConstraintsPanel
           constraints={system.constraints}
           onChange={constraints => save({ constraints })}

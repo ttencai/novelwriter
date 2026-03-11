@@ -186,16 +186,6 @@ def _filter_system_data_for_writer(display_type: str, data: Any) -> Any:
         filtered = [n for n in (filter_node(x) for x in nodes) if n is not None]
         return {**data, "nodes": filtered}
 
-    if display_type == "graph":
-        nodes = data.get("nodes")
-        edges = data.get("edges")
-        out = dict(data)
-        if isinstance(nodes, list):
-            out["nodes"] = [n for n in nodes if isinstance(n, dict) and keep(n.get("visibility"))]
-        if isinstance(edges, list):
-            out["edges"] = [e for e in edges if isinstance(e, dict) and keep(e.get("visibility"))]
-        return out
-
     if display_type == "timeline":
         events = data.get("events")
         if isinstance(events, list):

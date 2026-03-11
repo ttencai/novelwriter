@@ -379,23 +379,6 @@ class TestWorldSystem:
         assert len(system.constraints) == 2
         assert system.status == "draft"  # default
 
-    def test_create_graph_system(self, db, novel):
-        from app.models import WorldSystem
-
-        system = WorldSystem(
-            novel_id=novel.id,
-            name="势力格局",
-            display_type="graph",
-            data={
-                "nodes": [{"id": "cf", "label": "苍风帝国", "entity_id": None, "position": {"x": 100, "y": 200}}],
-                "edges": [{"from": "cf", "to": "lf", "label": "附属"}],
-            },
-        )
-        db.add(system)
-        db.commit()
-
-        assert system.display_type == "graph"
-
     def test_create_timeline_system(self, db, novel):
         from app.models import WorldSystem
 

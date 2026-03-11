@@ -26,6 +26,8 @@ from app.schemas import (
 class PlannedImportWarning:
     code: str
     message: str
+    message_key: str
+    message_params: dict[str, str | int | float | bool | None] = field(default_factory=dict)
     path: str | None = None
 
 
@@ -80,6 +82,23 @@ class _SystemRow(Protocol):
     worldpack_pack_id: str | None
 
 
+def _warning(
+    *,
+    code: str,
+    message: str,
+    message_key: str,
+    path: str | None = None,
+    message_params: dict[str, str | int | float | bool | None] | None = None,
+) -> PlannedImportWarning:
+    return PlannedImportWarning(
+        code=code,
+        message=message,
+        message_key=message_key,
+        message_params=message_params or {},
+        path=path,
+    )
+
+
 def _format_sample(items: list[str], *, max_items: int = 6) -> str:
     sample = items[:max_items]
     rest = len(items) - len(sample)
@@ -101,9 +120,11 @@ def collect_ambiguous_alias_warnings(entities: list[WorldpackV1Entity]) -> list[
     for alias, keys in sorted(alias_to_keys.items()):
         if len(keys) > 1:
             warnings.append(
-                PlannedImportWarning(
+                _warning(
                     code="ambiguous_alias",
                     message=f"Alias '{alias}' maps to multiple entities: {sorted(keys)}",
+                    message_key="worldpack.import.warning.ambiguous_alias",
+                    message_params={"alias": alias, "entity_keys": ", ".join(sorted(keys))},
                     path="entities[*].aliases",
                 )
             )
@@ -124,9 +145,11 @@ def plan_entity_import(
             return ImportDecision(
                 action="skip",
                 warnings=[
-                    PlannedImportWarning(
+                    _warning(
                         code="missing_name",
                         message=f"Entity '{incoming_entity.key}' missing name; skipped",
+                        message_key="worldpack.import.warning.entity_missing_name",
+                        message_params={"key": incoming_entity.key},
                         path=path,
                     )
                 ],
@@ -135,12 +158,14 @@ def plan_entity_import(
         return ImportDecision(
             action="keep_existing",
             warnings=[
-                PlannedImportWarning(
+                _warning(
                     code="missing_name_preserve_existing",
                     message=(
                         f"Entity '{incoming_entity.key}' missing name; kept existing row "
                         "for relationship resolution"
                     ),
+                    message_key="worldpack.import.warning.entity_missing_name_preserve_existing",
+                    message_params={"key": incoming_entity.key},
                     path=path,
                 )
             ],
@@ -168,12 +193,14 @@ def plan_entity_import(
             return ImportDecision(
                 action="skip",
                 warnings=[
-                    PlannedImportWarning(
+                    _warning(
                         code="entity_name_conflict",
                         message=(
                             f"Entity name '{name}' already exists and is linked to a "
                             "different worldpack identity; skipped"
                         ),
+                        message_key="worldpack.import.warning.entity_name_conflict",
+                        message_params={"name": name},
                         path=path,
                     )
                 ],
@@ -188,9 +215,11 @@ def plan_entity_import(
             action="link_existing",
             payload=changes,
             warnings=[
-                PlannedImportWarning(
+                _warning(
                     code="entity_linked_by_name",
                     message=f"Entity '{incoming_entity.key}' linked to existing row by name '{name}'",
+                    message_key="worldpack.import.warning.entity_linked_by_name",
+                    message_params={"key": incoming_entity.key, "name": name},
                     path=path.removesuffix(".name"),
                 )
             ],
@@ -274,9 +303,10 @@ def plan_relationship_import(
         return ImportDecision(
             action="skip",
             warnings=[
-                PlannedImportWarning(
+                _warning(
                     code="missing_relationship_label",
                     message="Relationship missing label; skipped",
+                    message_key="worldpack.import.warning.relationship_missing_label",
                 )
             ],
             track_desired_item=False,
@@ -286,13 +316,18 @@ def plan_relationship_import(
         return ImportDecision(
             action="skip",
             warnings=[
-                PlannedImportWarning(
+                _warning(
                     code="missing_relationship_refs",
                     message=(
                         "Relationship refs missing: "
                         f"source_key='{incoming_relationship.source_key}', "
                         f"target_key='{incoming_relationship.target_key}'"
                     ),
+                    message_key="worldpack.import.warning.relationship_missing_refs",
+                    message_params={
+                        "source_key": incoming_relationship.source_key,
+                        "target_key": incoming_relationship.target_key,
+                    },
                 )
             ],
             track_desired_item=False,
@@ -352,7 +387,14 @@ def plan_system_import(
     if not name:
         return ImportDecision(
             action="skip",
-            warnings=[PlannedImportWarning(code="missing_name", message="System missing name; skipped", path=path)],
+            warnings=[
+                _warning(
+                    code="missing_name",
+                    message="System missing name; skipped",
+                    message_key="worldpack.import.warning.system_missing_name",
+                    path=path,
+                )
+            ],
             track_desired_item=False,
         )
 
@@ -386,9 +428,11 @@ def plan_system_import(
         return ImportDecision(
             action="skip",
             warnings=[
-                PlannedImportWarning(
+                _warning(
                     code="system_name_conflict",
                     message=f"System name '{name}' already exists for a different pack; skipped",
+                    message_key="worldpack.import.warning.system_name_conflict",
+                    message_params={"name": name},
                     path=path,
                 )
             ],
@@ -414,9 +458,11 @@ def plan_entity_deletion(
         return ImportDecision(
             action="keep",
             warnings=[
-                PlannedImportWarning(
+                _warning(
                     code="skip_delete_promoted_entity",
                     message=f"Entity '{worldpack_key}' has non-worldpack dependencies; kept",
+                    message_key="worldpack.import.warning.skip_delete_promoted_entity",
+                    message_params={"key": worldpack_key},
                     path="entities",
                 )
             ],
@@ -428,9 +474,11 @@ def build_preserved_entity_warning(entity_keys: set[str]) -> PlannedImportWarnin
     if not entity_keys:
         return None
     keys = sorted(entity_keys)
-    return PlannedImportWarning(
+    return _warning(
         code="preserved_entities_skipped",
         message=f"Skipped overwriting {len(keys)} preserved entities: {_format_sample(keys)}",
+        message_key="worldpack.import.warning.preserved_entities_skipped",
+        message_params={"count": len(keys), "sample": _format_sample(keys)},
         path="entities",
     )
 
@@ -447,9 +495,11 @@ def build_preserved_attribute_warning(attribute_keys_by_entity: dict[str, set[st
         parts.append(f"{entity_key}[{_format_sample(keys, max_items=3)}]")
     rest = len(attribute_keys_by_entity) - len(sample_entities)
     suffix = f" (+{rest} more entities)" if rest > 0 else ""
-    return PlannedImportWarning(
+    return _warning(
         code="preserved_attributes_skipped",
         message=f"Skipped overwriting {total} preserved attributes: {'; '.join(parts)}{suffix}",
+        message_key="worldpack.import.warning.preserved_attributes_skipped",
+        message_params={"count": total, "sample": '; '.join(parts), "more_entities_count": rest},
         path="entities[*].attributes",
     )
 
@@ -458,12 +508,14 @@ def build_preserved_relationship_warning(relationship_signatures: set[str]) -> P
     if not relationship_signatures:
         return None
     signatures = sorted(relationship_signatures)
-    return PlannedImportWarning(
+    return _warning(
         code="preserved_relationships_skipped",
         message=(
             f"Skipped overwriting {len(signatures)} preserved relationships: "
             f"{_format_sample(signatures)}"
         ),
+        message_key="worldpack.import.warning.preserved_relationships_skipped",
+        message_params={"count": len(signatures), "sample": _format_sample(signatures)},
         path="relationships",
     )
 
@@ -472,8 +524,10 @@ def build_preserved_system_warning(system_names: set[str]) -> PlannedImportWarni
     if not system_names:
         return None
     names = sorted(system_names)
-    return PlannedImportWarning(
+    return _warning(
         code="preserved_systems_skipped",
         message=f"Skipped overwriting {len(names)} preserved systems: {_format_sample(names)}",
+        message_key="worldpack.import.warning.preserved_systems_skipped",
+        message_params={"count": len(names), "sample": _format_sample(names)},
         path="systems",
     )

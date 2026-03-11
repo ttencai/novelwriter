@@ -25,8 +25,24 @@ describe('postcheck storage', () => {
 
   it('keeps active warnings only when the chapter identity still matches', () => {
     const warnings = [
-      { code: 'unknown_term_named', term: '白骨夫人', version: 1 },
-      { code: 'unknown_address_token', term: '圣僧', version: 1 },
+      {
+        code: 'unknown_term_named',
+        term: '白骨夫人',
+        message: 'fallback',
+        message_key: 'continuation.postcheck.warning.unknown_term_named',
+        message_params: { term: '白骨夫人' },
+        version: 1,
+        evidence: null,
+      },
+      {
+        code: 'unknown_address_token',
+        term: '圣僧',
+        message: 'fallback',
+        message_key: 'continuation.postcheck.warning.unknown_address_token',
+        message_params: { term: '圣僧' },
+        version: 1,
+        evidence: null,
+      },
     ]
 
     setActiveWarnings(1, 3, warnings, '2026-03-09T00:00:00Z')

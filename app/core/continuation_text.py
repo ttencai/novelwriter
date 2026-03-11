@@ -73,47 +73,6 @@ def _render_hierarchy_data(data: Any) -> str:
     return "\n".join(lines)
 
 
-def _render_graph_data(data: Any) -> str:
-    if not isinstance(data, dict):
-        return ""
-    nodes = data.get("nodes") or []
-    edges = data.get("edges") or []
-    if not isinstance(nodes, list) and not isinstance(edges, list):
-        return ""
-
-    lines: list[str] = []
-    node_map: dict[str, str] = {}
-    for node in nodes:
-        if not isinstance(node, dict):
-            continue
-        node_id = str(node.get("id") or "")
-        label = str(node.get("label") or node.get("name") or node_id).strip()
-        node_map[node_id] = label
-        desc = str(node.get("description") or "").strip()
-        line = f"· {label}"
-        if desc:
-            line += f"：{desc}"
-        lines.append(line)
-
-    for edge in edges:
-        if not isinstance(edge, dict):
-            continue
-        src = node_map.get(
-            str(edge.get("source") or edge.get("from") or ""),
-            str(edge.get("source") or edge.get("from") or "?"),
-        )
-        tgt = node_map.get(
-            str(edge.get("target") or edge.get("to") or ""),
-            str(edge.get("target") or edge.get("to") or "?"),
-        )
-        label = str(edge.get("label") or "").strip()
-        if label:
-            lines.append(f"  {src} —{label}→ {tgt}")
-        else:
-            lines.append(f"  {src} → {tgt}")
-    return "\n".join(lines)
-
-
 def _render_timeline_data(data: Any) -> str:
     events = data.get("events") if isinstance(data, dict) else None
     if not isinstance(events, list) or not events:
@@ -124,7 +83,7 @@ def _render_timeline_data(data: Any) -> str:
         if not isinstance(event, dict):
             continue
         label = str(event.get("label") or "").strip()
-        date = str(event.get("date") or "").strip()
+        date = str(event.get("time") or event.get("date") or "").strip()
         desc = str(event.get("description") or "").strip()
         if not label:
             continue
@@ -158,7 +117,6 @@ def _render_list_data(data: Any) -> str:
 
 _SYSTEM_DATA_RENDERERS = {
     "hierarchy": _render_hierarchy_data,
-    "graph": _render_graph_data,
     "timeline": _render_timeline_data,
     "list": _render_list_data,
 }

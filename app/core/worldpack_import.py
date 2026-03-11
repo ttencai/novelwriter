@@ -84,6 +84,8 @@ class WorldpackImportCountsResult:
 class WorldpackImportWarningResult:
     code: str
     message: str
+    message_key: str
+    message_params: dict[str, str | int | float | bool | None] = field(default_factory=dict)
     path: str | None = None
 
 
@@ -110,6 +112,8 @@ def _append_warning(
         WorldpackImportWarningResult(
             code=warning.code,
             message=warning.message,
+            message_key=warning.message_key,
+            message_params=dict(warning.message_params),
             path=warning.path if warning.path is not None else fallback_path,
         )
     )
@@ -136,6 +140,8 @@ def _sync_entities_and_attributes(
                 WorldpackImportWarningResult(
                     code="duplicate_entity_key",
                     message=f"Duplicate entity key '{entity_in.key}' in payload; skipped",
+                    message_key="worldpack.import.warning.duplicate_entity_key",
+                    message_params={"key": entity_in.key},
                     path=f"entities[{idx}].key",
                 )
             )

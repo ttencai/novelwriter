@@ -96,7 +96,11 @@ _TEMPLATES: dict[PromptKey, str] = {
 3) 关系有方向：source 表示主动方 / 上位方 / 拥有者 / 发起动作的一方；target 表示被动方 / 下位方 / 被拥有者 / 承受动作的一方。
 4) 仅输出 schema 允许的字段，不要输出任何元数据（例如 id、origin、status、visibility 等）。
 5) systems 应优先承载世界规则、组织制度、修炼体系、历史分期、地理结构、阵营原则、禁忌规则等成组设定；当文本信息充分时，请拆成多个 items，而不是只写一句笼统概括。
-""",
+6) systems.display_type 只能使用三种：
+   - list：默认类型，适合平铺要点；items 只写 label/description。
+   - hierarchy：存在上下级、层级、树状归属时使用；items 用 children 表达嵌套结构。
+   - timeline：存在明确时间顺序、历史阶段、大事件年表时使用；items 必须提供 time。
+7) 不要输出 graph，也不要尝试生成坐标、边或布局信息。""",
 
     # ------------------------------------------------------------------
     # World generation: user message template
@@ -104,15 +108,19 @@ _TEMPLATES: dict[PromptKey, str] = {
     PromptKey.WORLD_GEN: """请阅读下面的世界观设定文本，并提取：
 - entities: 角色/地点/势力/组织/物品/概念/修炼体系中的"实体"
 - relationships: 实体之间的关系（必须给出 source/target/label）
-- systems: 世界规则/设定集合（用列表 items 表达要点；constraints 可用于必须遵守的写作规则）
+- systems: 世界规则/设定集合（必须给出 display_type；constraints 可用于必须遵守的写作规则）
 
 要求：
 1) 实体名称尽量使用文本原文，保持简短且唯一。
 2) entity_type 使用简洁英文类别（例如 Character/Location/Faction/Item/Concept/Organization/Vehicle），不需要枚举完整；如果不确定，使用 Concept。
 3) 关系 label 用简短中文短语表达，不要在 label 末尾添加"关系"二字（例如用"师父"而不是"师徒关系"）。
 4) 如果关系引用了未出现在 entities 中的实体，请宁可不输出该关系。
-5) systems 要尽量细化：当文本提供了规则、等级、阵营、地域、制度、历史阶段、禁忌、资源、技术路线等要点时，应拆成 items，而不是只写一条模糊 summary。
-6) 若文本信息量很大，请优先保证覆盖率，不要把几万字设定压缩成寥寥几个条目。
+5) systems.display_type 选择规则：
+   - list：默认；适合修炼资源种类、阵营原则、禁忌规则、制度要点等平铺信息。
+   - hierarchy：适合修炼等级体系、组织架构、权力金字塔、地域层级等树状结构；items 需用 children 嵌套。
+   - timeline：适合历史分期、大事件年表、王朝更替、灾变顺序等时间结构；items 需填写 time。
+6) systems 要尽量细化：当文本提供了规则、等级、阵营、地域、制度、历史阶段、禁忌、资源、技术路线等要点时，应拆成 items，而不是只写一条模糊 summary。
+7) 若文本信息量很大，请优先保证覆盖率，不要把几万字设定压缩成寥寥几个条目。
 
 {chunk_directive}
 

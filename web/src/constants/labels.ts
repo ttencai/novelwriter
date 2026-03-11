@@ -32,9 +32,9 @@ export const LABELS = {
   SYSTEM_ADD_ITEM: '+ 添加规则',
   SYSTEM_INSERT: '+ 插入',
   SYSTEM_TYPE_HIERARCHY: '层级结构',
-  SYSTEM_TYPE_GRAPH: '网络图',
   SYSTEM_TYPE_TIMELINE: '时间线',
   SYSTEM_TYPE_LIST: '列表',
+  SYSTEM_TYPE_GRAPH_LEGACY: '关系图（只读）',
   SYSTEM_DELETE: '删除体系',
   SYSTEM_DELETE_CONFIRM: '确认删除？',
 

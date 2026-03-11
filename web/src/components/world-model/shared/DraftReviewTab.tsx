@@ -6,6 +6,7 @@ import { useWorldEntities, useConfirmEntities, useRejectEntities } from '@/hooks
 import { useWorldRelationships, useConfirmRelationships, useRejectRelationships } from '@/hooks/world/useRelationships'
 import { useWorldSystems, useConfirmSystems, useRejectSystems } from '@/hooks/world/useSystems'
 import { LABELS } from '@/constants/labels'
+import { getSystemDisplayTypeLabel } from '@/lib/worldSystemDisplay'
 import type { WorldEntity, WorldRelationship, WorldSystem } from '@/types/api'
 
 type ReviewKind = 'entities' | 'relationships' | 'systems'
@@ -391,7 +392,7 @@ function SystemDraftCard({
         <div className="flex-1 min-w-0 space-y-1">
           <div className="flex items-center gap-2">
             <div className="text-sm font-semibold truncate">{system.name || '\u00A0'}</div>
-            <span className="text-xs text-muted-foreground">{system.display_type}</span>
+            <span className="text-xs text-muted-foreground">{getSystemDisplayTypeLabel(system.display_type)}</span>
             <span className="text-xs text-[hsl(var(--color-status-draft))]">● draft</span>
           </div>
           {system.description ? (

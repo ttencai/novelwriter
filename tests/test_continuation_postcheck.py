@@ -27,4 +27,5 @@ def test_postcheck_flags_unknown_terms_and_address_tokens():
     assert any(w.code == "unknown_address_token" and w.term == "忆儿" for w in warnings)
     assert any(w.code == "unknown_term_quoted" and w.term == "永夜渊" for w in warnings)
     assert all(w.version == 1 for w in warnings)
-
+    assert all(w.message_key.startswith("continuation.postcheck.warning.") for w in warnings)
+    assert any(w.message_params == {"term": "忆儿"} for w in warnings)

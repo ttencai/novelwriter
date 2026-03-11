@@ -190,6 +190,113 @@ def test_generate_world_systems_default_to_list_type(client, db, novel, monkeypa
     assert systems[0].display_type == "list"
 
 
+def test_worldgen_output_normalizes_unknown_system_display_type_to_list():
+    from app.core.world_gen import WorldGenLLMOutput
+
+    parsed = WorldGenLLMOutput.model_validate(
+        {
+            "systems": [
+                {
+                    "name": "世界规则",
+                    "display_type": "graph",
+                    "items": [{"label": "法则"}],
+                }
+            ]
+        }
+    )
+
+    assert parsed.systems[0].display_type == "list"
+
+
+def test_generate_world_persists_timeline_systems_and_skips_missing_time(client, db, novel, monkeypatch):
+    from app.core.ai_client import ai_client
+    from app.core.world_gen import WorldGenLLMOutput, WorldGenSystem, WorldGenSystemItem
+
+    llm_output = WorldGenLLMOutput(
+        entities=[],
+        relationships=[],
+        systems=[
+            WorldGenSystem(
+                name="历史年表",
+                display_type="timeline",
+                description="王朝关键节点",
+                items=[
+                    WorldGenSystemItem(time="上古纪元", label="灵气初开", description="天地初分"),
+                    WorldGenSystemItem(label="无时间事件", description="应被跳过"),
+                ],
+            )
+        ],
+    )
+
+    mock = AsyncMock(return_value=llm_output)
+    monkeypatch.setattr(ai_client, "generate_structured", mock)
+
+    resp = client.post(f"/api/novels/{novel.id}/world/generate", json={"text": "这是一段足够长的世界观设定文本。"})
+    assert resp.status_code == 200
+    payload = resp.json()
+    warning = next(w for w in payload.get("warnings", []) if w.get("code") == "system_item_skipped")
+    assert warning["message_key"] == "world.generate.warning.system_item_missing_time"
+    assert warning["message_params"] == {"display_type": "timeline"}
+
+    systems = db.query(WorldSystem).filter(WorldSystem.novel_id == novel.id).all()
+    assert len(systems) == 1
+    assert systems[0].display_type == "timeline"
+    assert systems[0].data == {
+        "events": [
+            {
+                "time": "上古纪元",
+                "label": "灵气初开",
+                "description": "天地初分",
+                "visibility": "reference",
+            }
+        ]
+    }
+
+
+def test_generate_world_persists_hierarchy_systems_with_generated_ids(client, db, novel, monkeypatch):
+    from app.core.ai_client import ai_client
+    from app.core.world_gen import WorldGenLLMOutput, WorldGenSystem, WorldGenSystemItem
+
+    llm_output = WorldGenLLMOutput(
+        entities=[],
+        relationships=[],
+        systems=[
+            WorldGenSystem(
+                name="宗门架构",
+                display_type="hierarchy",
+                items=[
+                    WorldGenSystemItem(
+                        label="外门",
+                        children=[
+                            WorldGenSystemItem(label="弟子"),
+                            WorldGenSystemItem(label="执事"),
+                        ],
+                    ),
+                    WorldGenSystemItem(label="内门"),
+                ],
+            )
+        ],
+    )
+
+    mock = AsyncMock(return_value=llm_output)
+    monkeypatch.setattr(ai_client, "generate_structured", mock)
+
+    resp = client.post(f"/api/novels/{novel.id}/world/generate", json={"text": "这是一段足够长的世界观设定文本。"})
+    assert resp.status_code == 200
+
+    systems = db.query(WorldSystem).filter(WorldSystem.novel_id == novel.id).all()
+    assert len(systems) == 1
+    assert systems[0].display_type == "hierarchy"
+    assert [node["label"] for node in systems[0].data["nodes"]] == ["外门", "内门"]
+
+    outer = systems[0].data["nodes"][0]
+    assert outer["visibility"] == "reference"
+    assert outer["id"].startswith("wg_")
+    assert [child["label"] for child in outer["children"]] == ["弟子", "执事"]
+    assert all(child["visibility"] == "reference" for child in outer["children"])
+    assert all(child["id"].startswith("wg_") for child in outer["children"])
+
+
 def test_generate_world_dedupes_relationships_and_systems(client, db, novel, monkeypatch):
     from app.core.ai_client import ai_client
     from app.core.world_gen import (
@@ -458,6 +565,139 @@ def test_generate_world_chunks_long_text_and_merges_results(client, db, novel, m
         items = systems[0].data.get("items") or []
         assert {item["label"] for item in items} == {"真玄境", "地玄境"}
         assert systems[0].constraints == ["不要随意改变修炼等级设定"]
+    finally:
+        config_mod._settings_instance = prev
+
+
+def test_generate_world_chunks_merge_hierarchy_systems(client, db, novel, monkeypatch):
+    import app.config as config_mod
+    from app.config import Settings
+    from app.core.ai_client import ai_client
+    from app.core.world_gen import WorldGenLLMOutput, WorldGenSystem, WorldGenSystemItem
+
+    prev = config_mod._settings_instance
+    config_mod._settings_instance = Settings(
+        world_generation_chunk_chars=12,
+        world_generation_chunk_overlap_chars=0,
+        world_generation_max_chunks=2,
+        world_generation_chunk_max_tokens=777,
+        _env_file=None,
+    )
+    try:
+        mock = AsyncMock(
+            side_effect=[
+                WorldGenLLMOutput(
+                    systems=[
+                        WorldGenSystem(
+                            name="宗门架构",
+                            display_type="hierarchy",
+                            items=[
+                                WorldGenSystemItem(
+                                    label="外门",
+                                    children=[WorldGenSystemItem(label="弟子")],
+                                )
+                            ],
+                        )
+                    ]
+                ),
+                WorldGenLLMOutput(
+                    systems=[
+                        WorldGenSystem(
+                            name="宗门架构",
+                            display_type="hierarchy",
+                            items=[
+                                WorldGenSystemItem(
+                                    label="外门",
+                                    children=[WorldGenSystemItem(label="执事")],
+                                ),
+                                WorldGenSystemItem(label="内门"),
+                            ],
+                        )
+                    ]
+                ),
+            ]
+        )
+        monkeypatch.setattr(ai_client, "generate_structured", mock)
+
+        resp = client.post(f"/api/novels/{novel.id}/world/generate", json={"text": "甲" * 25})
+        assert resp.status_code == 200
+
+        systems = db.query(WorldSystem).filter(WorldSystem.novel_id == novel.id).all()
+        assert len(systems) == 1
+        assert systems[0].display_type == "hierarchy"
+        assert [node["label"] for node in systems[0].data["nodes"]] == ["外门", "内门"]
+        assert [child["label"] for child in systems[0].data["nodes"][0]["children"]] == ["弟子", "执事"]
+    finally:
+        config_mod._settings_instance = prev
+
+
+def test_generate_world_chunks_downgrade_conflicting_system_shapes_to_list(client, db, novel, monkeypatch):
+    import app.config as config_mod
+    from app.config import Settings
+    from app.core.ai_client import ai_client
+    from app.core.world_gen import WorldGenLLMOutput, WorldGenSystem, WorldGenSystemItem
+
+    prev = config_mod._settings_instance
+    config_mod._settings_instance = Settings(
+        world_generation_chunk_chars=12,
+        world_generation_chunk_overlap_chars=0,
+        world_generation_max_chunks=2,
+        world_generation_chunk_max_tokens=777,
+        _env_file=None,
+    )
+    try:
+        mock = AsyncMock(
+            side_effect=[
+                WorldGenLLMOutput(
+                    systems=[
+                        WorldGenSystem(
+                            name="宗门沿革",
+                            display_type="hierarchy",
+                            items=[
+                                WorldGenSystemItem(
+                                    label="外门",
+                                    children=[WorldGenSystemItem(label="弟子")],
+                                )
+                            ],
+                        )
+                    ]
+                ),
+                WorldGenLLMOutput(
+                    systems=[
+                        WorldGenSystem(
+                            name="宗门沿革",
+                            display_type="timeline",
+                            items=[
+                                WorldGenSystemItem(
+                                    time="上古纪元",
+                                    label="内门建立",
+                                    description="宗门扩张",
+                                )
+                            ],
+                        )
+                    ]
+                ),
+            ]
+        )
+        monkeypatch.setattr(ai_client, "generate_structured", mock)
+
+        resp = client.post(f"/api/novels/{novel.id}/world/generate", json={"text": "甲" * 25})
+        assert resp.status_code == 200
+        payload = resp.json()
+        warning = next(w for w in payload.get("warnings", []) if w.get("code") == "system_display_type_conflict")
+        assert warning["message_key"] == "world.generate.warning.system_display_type_conflict"
+        assert warning["message_params"]["downgraded_display_type"] == "list"
+
+        systems = db.query(WorldSystem).filter(WorldSystem.novel_id == novel.id).all()
+        assert len(systems) == 1
+        assert systems[0].display_type == "list"
+        assert systems[0].data == {
+            "items": [
+                {"label": "外门", "visibility": "reference"},
+                {"label": "外门 / 弟子", "visibility": "reference"},
+                {"label": "[上古纪元] 内门建立", "description": "宗门扩张", "visibility": "reference"},
+            ]
+        }
     finally:
         config_mod._settings_instance = prev
 

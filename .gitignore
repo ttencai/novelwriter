@@ -68,6 +68,7 @@ benchmarks/bootstrap_v1/codex_sessions/
 *.log
 uvicorn.log
 logs/
+.deploy/
 
 # Reports/Drafts
 reports/

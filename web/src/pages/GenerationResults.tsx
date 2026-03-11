@@ -14,6 +14,7 @@ import { FeedbackForm, type FeedbackAnswers } from '@/components/feedback/Feedba
 import { DriftWarningPopover } from '@/components/generation/DriftWarningPopover'
 import { getWhitelist, addToWhitelist } from '@/lib/postcheckWhitelistStorage'
 import { setActiveWarnings } from '@/lib/postcheckActiveWarningsStorage'
+import { normalizePostcheckWarning } from '@/lib/postcheckWarnings'
 import { getLlmApiErrorMessage } from '@/lib/llmErrorMessages'
 import { api, streamContinuation, ApiError } from '@/services/api'
 import { useAuth } from '@/contexts/AuthContext'
@@ -285,10 +286,11 @@ export function GenerationResults() {
       if (raw) {
         const parsed: unknown = JSON.parse(raw)
         if (Array.isArray(parsed)) {
-          setReloadedWarnings(parsed.filter(
-            (v: unknown): v is PostcheckWarning =>
-              v != null && typeof v === 'object' && typeof (v as PostcheckWarning).code === 'string' && typeof (v as PostcheckWarning).term === 'string',
-          ))
+          setReloadedWarnings(
+            parsed
+              .map(normalizePostcheckWarning)
+              .filter((warning): warning is PostcheckWarning => warning != null),
+          )
         }
       }
     } catch { /* ignore */ }

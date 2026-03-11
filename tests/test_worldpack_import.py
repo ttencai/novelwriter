@@ -139,8 +139,11 @@ def test_relationship_missing_refs_warning(client, novel):
     resp = client.post(f"/api/novels/{novel.id}/world/worldpack/import", json=payload)
     assert resp.status_code == 200
     data = resp.json()
+    warning = next(w for w in data["warnings"] if w["code"] == "missing_relationship_refs")
     codes = {w["code"] for w in data["warnings"]}
     assert "missing_relationship_refs" in codes
+    assert warning["message_key"] == "worldpack.import.warning.relationship_missing_refs"
+    assert warning["message_params"] == {"source_key": "a", "target_key": "missing"}
     assert data["counts"]["relationships_created"] == 0
 
 

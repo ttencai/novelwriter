@@ -4,6 +4,7 @@ import { useImportWorldpack } from '@/hooks/world/useWorldpack'
 import { useToast } from '@/components/world-model/shared/useToast'
 import { LABELS } from '@/constants/labels'
 import { Button } from '@/components/ui/button'
+import { renderWarningMessage } from '@/lib/warningMessages'
 import type { WorldpackImportCounts, WorldpackImportResponse, WorldpackImportWarning, WorldpackV1 } from '@/types/api'
 
 type WorldpackPanelVariant = 'page' | 'sidebar'
@@ -50,7 +51,8 @@ function summarizeBucket(
 }
 
 function formatWarning(w: WorldpackImportWarning): string {
-  const base = w.code ? `[${w.code}] ${w.message}` : w.message
+  const rendered = renderWarningMessage(w)
+  const base = w.code ? `[${w.code}] ${rendered}` : rendered
   return w.path ? `${base} (${w.path})` : base
 }
 

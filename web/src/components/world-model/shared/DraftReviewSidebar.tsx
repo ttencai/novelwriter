@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { cn } from '@/lib/utils'
+import { getSystemDisplayTypeLabel } from '@/lib/worldSystemDisplay'
 import { Input } from '@/components/ui/input'
 import { useWorldEntities } from '@/hooks/world/useEntities'
 import { useWorldRelationships } from '@/hooks/world/useRelationships'
@@ -80,7 +81,7 @@ export function DraftReviewSidebar({
       .map((s) => ({
         id: s.id,
         title: s.name || '\u00A0',
-        meta: s.display_type,
+        meta: getSystemDisplayTypeLabel(s.display_type),
       }))
   }, [draftEntities, draftRelationships, draftSystems, entityMap, kind, q])
 

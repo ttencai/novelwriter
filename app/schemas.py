@@ -8,7 +8,9 @@ from app.config import MAX_CONTEXT_CHAPTERS
 from app.world_visibility import WorldVisibility, normalize_visibility
 
 WorldOrigin = Literal["manual", "bootstrap", "worldpack", "worldgen"]
-SystemDisplayType = Literal["hierarchy", "graph", "timeline", "list"]
+SystemDisplayType = Literal["hierarchy", "timeline", "list"]
+LegacySystemDisplayType = Literal["hierarchy", "timeline", "list", "graph"]
+WarningMessageParam = str | int | float | bool | None
 
 
 class NovelBase(BaseModel):
@@ -126,12 +128,17 @@ class OutlineGenerateResponse(BaseModel):
     outlines: List[OutlineResponse]
 
 
-class PostcheckWarning(BaseModel):
+class LocalizedWarningBase(BaseModel):
+    code: str
+    message: str
+    message_key: str
+    message_params: dict[str, WarningMessageParam] = Field(default_factory=dict)
+
+
+class PostcheckWarning(LocalizedWarningBase):
     """Post-generation consistency/lore drift warning (non-blocking)."""
 
-    code: str
     term: str
-    message: str
     version: int | None = None
     evidence: str | None = None
 
@@ -469,51 +476,6 @@ class _HierarchyData(BaseModel):
     nodes: List[_HierarchyNode] = Field(default_factory=list)
 
 
-class _GraphPosition(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    # Preserve integer JSON values (e.g. {"x": 0}) for contract roundtrips while
-    # still accepting floats.
-    x: int | float
-    y: int | float
-
-
-class _GraphNode(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    id: str = Field(min_length=1, max_length=255)
-    label: str
-    entity_id: int | None = None
-    position: _GraphPosition
-    visibility: WorldVisibility = "active"
-
-    @field_validator("visibility", mode="before")
-    @classmethod
-    def _normalize_visibility_field(cls, v: object) -> object:
-        return normalize_visibility(v)
-
-
-class _GraphEdge(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    from_: str = Field(alias="from", min_length=1, max_length=255)
-    to: str = Field(min_length=1, max_length=255)
-    label: str
-    visibility: WorldVisibility = "active"
-
-    @field_validator("visibility", mode="before")
-    @classmethod
-    def _normalize_visibility_field(cls, v: object) -> object:
-        return normalize_visibility(v)
-
-
-class _GraphData(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    nodes: List[_GraphNode] = Field(default_factory=list)
-    edges: List[_GraphEdge] = Field(default_factory=list)
-
-
 class _TimelineEvent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -558,7 +520,6 @@ class _ListData(BaseModel):
 
 _SYSTEM_DATA_ADAPTERS: dict[SystemDisplayType, TypeAdapter] = {
     "hierarchy": TypeAdapter(_HierarchyData),
-    "graph": TypeAdapter(_GraphData),
     "timeline": TypeAdapter(_TimelineData),
     "list": TypeAdapter(_ListData),
 }
@@ -571,7 +532,6 @@ def normalize_and_validate_system_data(display_type: SystemDisplayType, data: An
         # Prefer a clean validation error over KeyError -> 500.
         raise ValueError(f"Unknown system display_type: {display_type}")
     parsed = adapter.validate_python(data if data is not None else {})
-    # Preserve the canonical wire keys (e.g. "from" for graph edges).
     # Do not inject defaults into user payloads; contract tests expect exact
     # roundtrip semantics for system.data.
     return parsed.model_dump(by_alias=True, exclude_unset=True)
@@ -614,7 +574,10 @@ class WorldSystemResponse(BaseModel):
     id: int
     novel_id: int
     name: str
-    display_type: SystemDisplayType
+    # Transitional read-side compatibility: existing production rows may still
+    # contain legacy `graph` systems, but write-side validation no longer
+    # accepts creating or editing graph payloads.
+    display_type: LegacySystemDisplayType
     description: str
     data: dict
     constraints: List[str]
@@ -705,9 +668,7 @@ class WorldGenerateRequest(BaseModel):
         return v
 
 
-class WorldGenerateWarning(BaseModel):
-    code: str
-    message: str
+class WorldGenerateWarning(LocalizedWarningBase):
     path: str | None = None
 
 
@@ -825,9 +786,7 @@ class WorldpackImportCounts(BaseModel):
     systems_deleted: int = 0
 
 
-class WorldpackImportWarning(BaseModel):
-    code: str
-    message: str
+class WorldpackImportWarning(LocalizedWarningBase):
     path: str | None = None
 
 

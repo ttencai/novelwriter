@@ -8,20 +8,13 @@ import { Input } from '@/components/ui/input'
 import { GlassSurface } from '@/components/ui/glass-surface'
 import { useWorldSystems, useCreateSystem, useUpdateSystem, useDeleteSystem, useConfirmSystems, useRejectSystems } from '@/hooks/world/useSystems'
 import { LABELS } from '@/constants/labels'
+import { getSystemDisplayTypeLabel } from '@/lib/worldSystemDisplay'
 import type { WorldSystem, SystemDisplayType } from '@/types/api'
 
-const TYPE_LABELS: Record<SystemDisplayType, string> = {
-  hierarchy: LABELS.SYSTEM_TYPE_HIERARCHY,
-  graph: LABELS.SYSTEM_TYPE_GRAPH,
-  timeline: LABELS.SYSTEM_TYPE_TIMELINE,
-  list: LABELS.SYSTEM_TYPE_LIST,
-}
-
-const DISPLAY_TYPES: SystemDisplayType[] = ['hierarchy', 'graph', 'timeline', 'list']
+const DISPLAY_TYPES: SystemDisplayType[] = ['hierarchy', 'timeline', 'list']
 
 const INITIAL_DATA: Record<SystemDisplayType, Record<string, unknown>> = {
   hierarchy: { nodes: [] },
-  graph: { nodes: [], edges: [] },
   timeline: { events: [] },
   list: { items: [] },
 }
@@ -117,7 +110,7 @@ export function SystemList({ novelId, selectedId, onSelect, onOpenDraftReview }:
                     className="block w-full text-left px-4 py-2 text-sm hover:bg-[var(--nw-glass-bg-hover)]"
                     onClick={() => handleCreate(t)}
                   >
-                    {TYPE_LABELS[t]}
+                    {getSystemDisplayTypeLabel(t)}
                   </button>
                 ))}
               </GlassSurface>
@@ -172,7 +165,7 @@ export function SystemList({ novelId, selectedId, onSelect, onOpenDraftReview }:
               <div className="text-sm font-medium truncate text-foreground">{sys.name || '\u00A0'}</div>
               {sys.description && <div className="text-xs text-muted-foreground line-clamp-1">{sys.description}</div>}
             </div>
-            <span className="text-xs text-muted-foreground shrink-0">{TYPE_LABELS[sys.display_type]}</span>
+            <span className="text-xs text-muted-foreground shrink-0">{getSystemDisplayTypeLabel(sys.display_type)}</span>
             {sys.constraints.length > 0 && (
               <span className="text-xs text-muted-foreground shrink-0">{sys.constraints.length}</span>
             )}
