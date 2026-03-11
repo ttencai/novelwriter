@@ -52,4 +52,5 @@ def test_hosted_deploy_workflow_bootstraps_script_from_origin_master_for_rollbac
 
     assert "git show origin/master:scripts/deploy_hosted.sh" in workflow
     assert "bash .deploy/deploy_hosted.sh" in workflow
+    assert "git fetch origin refs/heads/master:refs/remotes/origin/master --tags --force" in workflow
     assert "git checkout --detach %q && NOVWR_PREVIOUS_SHA" not in workflow
