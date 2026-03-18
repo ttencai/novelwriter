@@ -169,7 +169,7 @@ def _extract_query_terms(query: str, language: str | None) -> list[QueryTerm]:
     else:
         candidate_terms.append(raw_query)
         try:
-            from app.core.bootstrap import get_tokenizer
+            from app.core.indexing.builder import get_tokenizer
 
             tokenizer = get_tokenizer(policy.language)
             candidate_terms.extend(tokenizer.tokenize(raw_query))

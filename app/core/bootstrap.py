@@ -4,14 +4,10 @@
 from __future__ import annotations
 
 import logging
-import math
 import time
-from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from itertools import combinations
-from pathlib import Path
-from typing import Callable, Protocol, Sequence
+from typing import Callable, Sequence
 
 from pydantic import BaseModel, Field
 from sqlalchemy import or_
@@ -19,39 +15,30 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.ai_client import AIClient, StructuredOutputParseError, get_client
+from app.core.indexing.builder import (
+    ChapterText,
+    build_window_index,
+    compute_cooccurrence,
+    extract_candidates,
+    load_common_words,
+    tokenize_text,
+)
 from app.core.llm_semaphore import acquire_llm_slot_blocking, release_llm_slot
 from app.core.text import PromptKey, get_prompt
-from app.core.world.write import build_relationship_signature, relationship_signature_from_row
-from app.core.indexing.window_index import NovelIndex, WindowRef
+from app.core.world.write import (
+    build_relationship_signature,
+    relationship_signature_from_row,
+)
+from app.core.indexing.window_index import NovelIndex
 from app.database import SessionLocal
 from app.language import resolve_prompt_locale
-from app.language_policy import (
-    detect_language_from_text,
-    get_language_policy,
-    resolve_text_processing_language,
-)
+from app.language_policy import get_language_policy
 from app.models import BootstrapJob, Chapter, Novel, WorldEntity, WorldRelationship
-
-try:
-    import ahocorasick
-except ImportError:  # pragma: no cover - local fallback when dependency is missing
-    ahocorasick = None
-
-try:
-    import jieba
-except ImportError:  # pragma: no cover - local fallback when dependency is missing
-    jieba = None
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_WINDOW_SIZE = 500
-DEFAULT_WINDOW_STEP = 250
-DEFAULT_MIN_WINDOW_COUNT = 3
-DEFAULT_MIN_WINDOW_RATIO = 0.005
 DEFAULT_MAX_CANDIDATES = 500
 DEFAULT_LLM_TEMPERATURE = 0.3
-DEFAULT_COMMON_WORDS_DIR = "data/common_words"
-DEFAULT_CJK_SPACE_RATIO_THRESHOLD = 0.05
 DEFAULT_STALE_JOB_TIMEOUT_SECONDS = 900
 BOOTSTRAP_PARSE_ERROR_MESSAGE = "AI 输出解析失败，请重试"
 BOOTSTRAP_PARSE_ERROR_KEY = "bootstrap.error.parse_failed"
@@ -84,14 +71,6 @@ _ALLOWED_TRANSITIONS = {
     "failed": set(),
 }
 
-_COMMON_WORD_FILE_BY_LANGUAGE = {
-    "zh": "zh.txt",
-    "en": "en.txt",
-}
-_COMMON_WORDS_CACHE: dict[tuple[str, str], frozenset[str]] = {}
-_COMMON_WORDS_COMBINED_CACHE: dict[tuple[str, str], frozenset[str]] = {}
-
-_TRIM_CHARS = " \t\r\n.,!?;:\"'()[]{}<>，。！？；：、“”‘’（）【】《》、…·-—"
 _KNOWN_BOOTSTRAP_MODES = frozenset(
     {
         BOOTSTRAP_MODE_INITIAL,
@@ -105,12 +84,6 @@ _KNOWN_REEXTRACT_DRAFT_POLICIES = frozenset(
         BOOTSTRAP_DRAFT_POLICY_MERGE,
     }
 )
-
-
-@dataclass(slots=True)
-class ChapterText:
-    chapter_id: int
-    text: str
 
 
 @dataclass(slots=True)
@@ -128,41 +101,6 @@ class BootstrapRunSummary:
     mode: str
     entities_found: int
     relationships_found: int
-
-
-class Tokenizer(Protocol):
-    def tokenize(self, text: str) -> list[str]:
-        ...
-
-
-class WhitespaceTokenizer:
-    def tokenize(self, text: str) -> list[str]:
-        return text.split()
-
-
-class CharacterNgramTokenizer:
-    def __init__(self, *, n: int = 2):
-        self.n = max(2, int(n))
-
-    def tokenize(self, text: str) -> list[str]:
-        cleaned = "".join(ch if ch not in _TRIM_CHARS else " " for ch in text)
-        chunks = [chunk for chunk in cleaned.split() if chunk]
-        tokens: list[str] = []
-        for chunk in chunks:
-            if len(chunk) < 2:
-                continue
-            if len(chunk) <= self.n:
-                tokens.append(chunk)
-                continue
-            tokens.extend(chunk[i : i + self.n] for i in range(0, len(chunk) - self.n + 1))
-        return tokens
-
-
-class JiebaTokenizer:
-    def tokenize(self, text: str) -> list[str]:
-        if jieba is None:
-            return CharacterNgramTokenizer(n=2).tokenize(text)
-        return [token for token in jieba.lcut(text) if token]
 
 
 class RefinedEntity(BaseModel):
@@ -260,249 +198,6 @@ def transition_bootstrap_job(
         job.error = error or "Bootstrap failed"
 
 
-def detect_language(text: str, *, cjk_space_ratio_threshold: float = DEFAULT_CJK_SPACE_RATIO_THRESHOLD) -> str:
-    return detect_language_from_text(text, cjk_space_ratio_threshold=cjk_space_ratio_threshold)
-
-
-def get_tokenizer(
-    language: str,
-    *,
-    cjk_tokenizer: Tokenizer | None = None,
-    cjk_ngram_tokenizer: Tokenizer | None = None,
-    whitespace_tokenizer: Tokenizer | None = None,
-) -> Tokenizer:
-    policy = get_language_policy(language)
-    if policy.tokenizer_kind == "jieba":
-        return cjk_tokenizer or JiebaTokenizer()
-    if policy.tokenizer_kind == "cjk_bigram":
-        return cjk_ngram_tokenizer or CharacterNgramTokenizer(n=2)
-    return whitespace_tokenizer or WhitespaceTokenizer()
-
-
-def tokenize_text(
-    text: str,
-    *,
-    language: str | None = None,
-    tokenizer: Tokenizer | None = None,
-) -> tuple[str, list[str]]:
-    resolved_language = resolve_text_processing_language(language, sample_text=text)
-    resolved_tokenizer = tokenizer or get_tokenizer(resolved_language)
-    return resolved_language, resolved_tokenizer.tokenize(text)
-
-
-def normalize_token(token: str) -> str:
-    return token.strip(_TRIM_CHARS)
-
-
-def _resolve_common_words_base_dir(common_words_dir: str) -> Path:
-    base_dir = Path(common_words_dir)
-    if not base_dir.is_absolute():
-        base_dir = Path(__file__).resolve().parents[2] / base_dir
-    return base_dir.resolve()
-
-
-def _load_common_words_file(file_path: Path, language_code: str) -> frozenset[str]:
-    cache_key = (str(file_path), language_code)
-    cached = _COMMON_WORDS_CACHE.get(cache_key)
-    if cached is not None:
-        return cached
-
-    if not file_path.exists():
-        raise FileNotFoundError(f"Common words file does not exist: {file_path}")
-
-    words: set[str] = set()
-    with file_path.open("r", encoding="utf-8") as handle:
-        for raw_line in handle:
-            word = raw_line.strip()
-            if not word or word.startswith("#"):
-                continue
-            normalized_word = get_language_policy(language_code).normalize_for_matching(word)
-            words.add(word)
-            words.add(normalized_word)
-
-    frozen_words = frozenset(words)
-    _COMMON_WORDS_CACHE[cache_key] = frozen_words
-    return frozen_words
-
-
-def load_common_words(language: str, *, common_words_dir: str = DEFAULT_COMMON_WORDS_DIR) -> set[str]:
-    policy = get_language_policy(language)
-    normalized_language = policy.common_words_bucket
-    base_dir = _resolve_common_words_base_dir(common_words_dir)
-    combined_cache_key = (str(base_dir), normalized_language)
-    cached = _COMMON_WORDS_COMBINED_CACHE.get(combined_cache_key)
-    if cached is not None:
-        return set(cached)
-
-    fallback_language = "en" if normalized_language == "zh" else "zh"
-    primary_words = _load_common_words_file(
-        base_dir / _COMMON_WORD_FILE_BY_LANGUAGE[normalized_language],
-        normalized_language,
-    )
-    fallback_words = _load_common_words_file(
-        base_dir / _COMMON_WORD_FILE_BY_LANGUAGE[fallback_language],
-        fallback_language,
-    )
-    merged = frozenset(set(primary_words) | set(fallback_words))
-    _COMMON_WORDS_COMBINED_CACHE[combined_cache_key] = merged
-    return set(merged)
-
-
-def extract_candidates(
-    tokens: Sequence[str],
-    common_words: set[str],
-    *,
-    language: str | None = None,
-) -> dict[str, int]:
-    policy = get_language_policy(language)
-    counts: Counter[str] = Counter()
-    for token in tokens:
-        normalized = policy.normalize_token(token)
-        if len(normalized) < 2:
-            continue
-        match_key = policy.normalize_for_matching(normalized)
-        if normalized in common_words or match_key in common_words:
-            continue
-        counts[normalized] += 1
-    return dict(counts)
-
-
-def _window_offsets(text_length: int, window_size: int, window_step: int) -> list[int]:
-    if text_length <= 0:
-        return []
-    if text_length <= window_size:
-        return [0]
-
-    offsets = list(range(0, max(text_length - window_size + 1, 1), window_step))
-    last_start = text_length - window_size
-    if offsets and offsets[-1] != last_start:
-        offsets.append(last_start)
-    return offsets
-
-
-def _build_automaton(candidate_names: Sequence[str]):
-    if ahocorasick is None:
-        return None
-
-    automaton = ahocorasick.Automaton()
-    for name in candidate_names:
-        if name:
-            automaton.add_word(name, name)
-    automaton.make_automaton()
-    return automaton
-
-
-def _match_candidates_in_window(window_text: str, candidate_names: Sequence[str], automaton) -> set[str]:
-    if not window_text:
-        return set()
-
-    if automaton is not None:
-        matches: set[str] = set()
-        for _, candidate in automaton.iter(window_text):
-            matches.add(candidate)
-        return matches
-
-    return {candidate for candidate in candidate_names if candidate in window_text}
-
-
-def build_window_index(
-    chapters: Sequence[ChapterText],
-    candidates: dict[str, int],
-    *,
-    window_size: int = DEFAULT_WINDOW_SIZE,
-    window_step: int = DEFAULT_WINDOW_STEP,
-    min_window_count: int = DEFAULT_MIN_WINDOW_COUNT,
-    min_window_ratio: float = DEFAULT_MIN_WINDOW_RATIO,
-) -> tuple[NovelIndex, dict[str, int]]:
-    if window_size <= 0 or window_step <= 0:
-        raise ValueError("Window size and step must be positive")
-    if min_window_count < 1:
-        raise ValueError("min_window_count must be >= 1")
-    if min_window_ratio < 0:
-        raise ValueError("min_window_ratio must be >= 0")
-
-    candidate_names = [name for name in candidates if name]
-    if not candidate_names or not chapters:
-        return NovelIndex(), {}
-
-    automaton = _build_automaton(candidate_names)
-
-    entity_windows_raw: dict[str, list[WindowRef]] = defaultdict(list)
-    window_entities_raw: dict[int, set[str]] = defaultdict(set)
-    importance_counter: Counter[str] = Counter()
-
-    total_windows = 0
-    window_id = 1
-
-    for chapter in chapters:
-        chapter_text = chapter.text or ""
-        if not chapter_text.strip():
-            continue
-        for start_pos in _window_offsets(len(chapter_text), window_size, window_step):
-            end_pos = min(start_pos + window_size, len(chapter_text))
-            window_text = chapter_text[start_pos:end_pos]
-            total_windows += 1
-
-            present_candidates = _match_candidates_in_window(window_text, candidate_names, automaton)
-            if not present_candidates:
-                window_id += 1
-                continue
-
-            entity_count = len(present_candidates)
-            for candidate in present_candidates:
-                ref = WindowRef(
-                    window_id=window_id,
-                    chapter_id=chapter.chapter_id,
-                    start_pos=start_pos,
-                    end_pos=end_pos,
-                    entity_count=entity_count,
-                )
-                entity_windows_raw[candidate].append(ref)
-                window_entities_raw[window_id].add(candidate)
-                importance_counter[candidate] += 1
-            window_id += 1
-
-    if total_windows == 0:
-        return NovelIndex(), {}
-
-    threshold = max(min_window_count, math.ceil(total_windows * min_window_ratio))
-
-    filtered_entity_windows: dict[str, list[WindowRef]] = {}
-    filtered_window_entities: dict[int, set[str]] = defaultdict(set)
-    filtered_importance: dict[str, int] = {}
-
-    for candidate, count in importance_counter.items():
-        if count < threshold:
-            continue
-        windows = sorted(entity_windows_raw[candidate], key=lambda ref: (-ref.entity_count, ref.window_id))
-        filtered_entity_windows[candidate] = windows
-        filtered_importance[candidate] = count
-        for window_ref in windows:
-            filtered_window_entities[window_ref.window_id].add(candidate)
-
-    return (
-        NovelIndex(
-            entity_windows=filtered_entity_windows,
-            window_entities=dict(filtered_window_entities),
-        ),
-        filtered_importance,
-    )
-
-
-def compute_cooccurrence(index: NovelIndex) -> list[tuple[str, str, int]]:
-    pair_counts: Counter[tuple[str, str]] = Counter()
-    for entities in index.window_entities.values():
-        if len(entities) < 2:
-            continue
-        for left, right in combinations(sorted(entities), 2):
-            pair_counts[(left, right)] += 1
-
-    return sorted(
-        [(left, right, count) for (left, right), count in pair_counts.items()],
-        key=lambda item: (-item[2], item[0], item[1]),
-    )
-
-
 def _build_refinement_prompt(
     importance: dict[str, int],
     cooccurrence_pairs: Sequence[tuple[str, str, int]],
@@ -510,11 +205,21 @@ def _build_refinement_prompt(
     max_candidates: int,
     prompt_locale: str | None = None,
 ) -> str:
-    sorted_candidates = sorted(importance.items(), key=lambda item: (-item[1], item[0]))[:max_candidates]
+    sorted_candidates = sorted(
+        importance.items(), key=lambda item: (-item[1], item[0])
+    )[:max_candidates]
     sorted_pairs = list(cooccurrence_pairs[: max_candidates * 2])
 
-    candidate_lines = "\n".join([f"- {name}: {count}" for name, count in sorted_candidates]) or "- (none)"
-    pair_lines = "\n".join([f"- {left} -- {right}: {count}" for left, right, count in sorted_pairs]) or "- (none)"
+    candidate_lines = (
+        "\n".join([f"- {name}: {count}" for name, count in sorted_candidates])
+        or "- (none)"
+    )
+    pair_lines = (
+        "\n".join(
+            [f"- {left} -- {right}: {count}" for left, right, count in sorted_pairs]
+        )
+        or "- (none)"
+    )
 
     locale = prompt_locale or "zh"
     return get_prompt(PromptKey.BOOTSTRAP_REFINEMENT, locale=locale).format(
@@ -539,7 +244,8 @@ async def refine_candidates_with_llm(
 
     prompt_locale = resolve_prompt_locale(novel_language=novel_language)
     prompt = _build_refinement_prompt(
-        importance, cooccurrence_pairs,
+        importance,
+        cooccurrence_pairs,
         max_candidates=max_candidates,
         prompt_locale=prompt_locale,
     )
@@ -558,7 +264,9 @@ async def refine_candidates_with_llm(
 
 
 def _normalize_aliases(raw_aliases: Sequence[str], canonical_name: str) -> list[str]:
-    canonical_key = get_language_policy(sample_text=canonical_name).normalize_for_matching(canonical_name.strip())
+    canonical_key = get_language_policy(
+        sample_text=canonical_name
+    ).normalize_for_matching(canonical_name.strip())
     seen = {canonical_key}
     aliases: list[str] = []
     for raw_alias in raw_aliases:
@@ -627,11 +335,13 @@ def find_legacy_manual_draft_ambiguity(
             WorldEntity.id,
             WorldEntity.created_at,
             WorldEntity.updated_at,
-        ).filter(
+        )
+        .filter(
             WorldEntity.novel_id == novel_id,
             WorldEntity.status == "draft",
             WorldEntity.origin == "manual",
-        ).all()
+        )
+        .all()
         if _is_legacy_manual_draft_row(
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -645,11 +355,13 @@ def find_legacy_manual_draft_ambiguity(
             WorldRelationship.id,
             WorldRelationship.created_at,
             WorldRelationship.updated_at,
-        ).filter(
+        )
+        .filter(
             WorldRelationship.novel_id == novel_id,
             WorldRelationship.status == "draft",
             WorldRelationship.origin == "manual",
-        ).all()
+        )
+        .all()
         if _is_legacy_manual_draft_row(
             created_at=row.created_at,
             updated_at=row.updated_at,
@@ -666,11 +378,13 @@ def find_legacy_manual_draft_ambiguity(
 def _delete_bootstrap_origin_drafts(db: Session, *, novel_id: int) -> None:
     bootstrap_draft_entity_ids = [
         entity_id
-        for (entity_id,) in db.query(WorldEntity.id).filter(
+        for (entity_id,) in db.query(WorldEntity.id)
+        .filter(
             WorldEntity.novel_id == novel_id,
             WorldEntity.status == "draft",
             WorldEntity.origin == "bootstrap",
-        ).all()
+        )
+        .all()
     ]
 
     db.query(WorldRelationship).filter(
@@ -682,16 +396,20 @@ def _delete_bootstrap_origin_drafts(db: Session, *, novel_id: int) -> None:
     if not bootstrap_draft_entity_ids:
         return
 
-    referenced_rows = db.query(
-        WorldRelationship.source_id,
-        WorldRelationship.target_id,
-    ).filter(
-        WorldRelationship.novel_id == novel_id,
-        or_(
-            WorldRelationship.source_id.in_(bootstrap_draft_entity_ids),
-            WorldRelationship.target_id.in_(bootstrap_draft_entity_ids),
-        ),
-    ).all()
+    referenced_rows = (
+        db.query(
+            WorldRelationship.source_id,
+            WorldRelationship.target_id,
+        )
+        .filter(
+            WorldRelationship.novel_id == novel_id,
+            or_(
+                WorldRelationship.source_id.in_(bootstrap_draft_entity_ids),
+                WorldRelationship.target_id.in_(bootstrap_draft_entity_ids),
+            ),
+        )
+        .all()
+    )
     referenced_entity_ids = {
         entity_id
         for row in referenced_rows
@@ -735,7 +453,9 @@ def persist_bootstrap_output(
 
     existing_entities = {
         entity.name: entity
-        for entity in db.query(WorldEntity).filter(WorldEntity.novel_id == novel_id).all()
+        for entity in db.query(WorldEntity)
+        .filter(WorldEntity.novel_id == novel_id)
+        .all()
     }
     entity_ids_by_name: dict[str, int] = {}
     entities_written = 0
@@ -746,7 +466,11 @@ def persist_bootstrap_output(
             continue
 
         aliases = _normalize_aliases(refined_entity.aliases, name)
-        entity_type = refined_entity.entity_type.strip() if refined_entity.entity_type else "other"
+        entity_type = (
+            refined_entity.entity_type.strip()
+            if refined_entity.entity_type
+            else "other"
+        )
         if not entity_type:
             entity_type = "other"
 
@@ -766,7 +490,9 @@ def persist_bootstrap_output(
             entities_written += 1
         elif entity.status == "draft" and entity.origin == "bootstrap":
             entity.entity_type = entity_type
-            merged_aliases = _normalize_aliases([*(entity.aliases or []), *aliases], name)
+            merged_aliases = _normalize_aliases(
+                [*(entity.aliases or []), *aliases], name
+            )
             entity.aliases = merged_aliases
             entities_written += 1
 
@@ -776,7 +502,9 @@ def persist_bootstrap_output(
     # when the same (source, target, label_canonical) pair already exists in either direction.
     existing_relationship_keys = {
         relationship_signature_from_row(rel)
-        for rel in db.query(WorldRelationship).filter(WorldRelationship.novel_id == novel_id).all()
+        for rel in db.query(WorldRelationship)
+        .filter(WorldRelationship.novel_id == novel_id)
+        .all()
     }
     relationships_written = 0
 
@@ -784,7 +512,12 @@ def persist_bootstrap_output(
         source_name = refined_relationship.source_name.strip()
         target_name = refined_relationship.target_name.strip()
         label = refined_relationship.label.strip()
-        if not source_name or not target_name or not label or source_name == target_name:
+        if (
+            not source_name
+            or not target_name
+            or not label
+            or source_name == target_name
+        ):
             continue
         source_id = entity_ids_by_name.get(source_name)
         target_id = entity_ids_by_name.get(target_name)
@@ -797,13 +530,18 @@ def persist_bootstrap_output(
         if source_id is None or target_id is None:
             continue
 
-        direct_key = build_relationship_signature(source_id=source_id, target_id=target_id, label=label)
+        direct_key = build_relationship_signature(
+            source_id=source_id, target_id=target_id, label=label
+        )
         reverse_key = build_relationship_signature(
             source_id=target_id,
             target_id=source_id,
             label_canonical=direct_key[2],
         )
-        if direct_key in existing_relationship_keys or reverse_key in existing_relationship_keys:
+        if (
+            direct_key in existing_relationship_keys
+            or reverse_key in existing_relationship_keys
+        ):
             continue
 
         new_rel = WorldRelationship(
@@ -869,25 +607,45 @@ async def run_bootstrap_job(
             raise ValueError("Novel has no non-empty chapter text to bootstrap")
 
         combined_text = "\n".join(chapter.text for chapter in chapters)
-        logger.info("bootstrap[%d]: loaded %d chapters, %d chars", job_id, len(chapters), len(combined_text))
+        logger.info(
+            "bootstrap[%d]: loaded %d chapters, %d chars",
+            job_id,
+            len(chapters),
+            len(combined_text),
+        )
 
         transition_bootstrap_job(job, "tokenizing", detail="tokenizing chapters")
         db.commit()
 
         t0 = time.monotonic()
-        language, tokens = tokenize_text(combined_text, language=getattr(novel, "language", None))
+        language, tokens = tokenize_text(
+            combined_text, language=getattr(novel, "language", None)
+        )
         common_words = load_common_words(
             language,
             common_words_dir=settings.bootstrap_common_words_dir,
         )
-        logger.info("bootstrap[%d]: tokenized in %.1fs → %d tokens (%s)", job_id, time.monotonic() - t0, len(tokens), language)
+        logger.info(
+            "bootstrap[%d]: tokenized in %.1fs → %d tokens (%s)",
+            job_id,
+            time.monotonic() - t0,
+            len(tokens),
+            language,
+        )
 
-        transition_bootstrap_job(job, "extracting", detail=f"extracting candidates ({language})")
+        transition_bootstrap_job(
+            job, "extracting", detail=f"extracting candidates ({language})"
+        )
         db.commit()
 
         t0 = time.monotonic()
         candidates = extract_candidates(tokens, common_words, language=language)
-        logger.info("bootstrap[%d]: extracted %d candidates in %.1fs", job_id, len(candidates), time.monotonic() - t0)
+        logger.info(
+            "bootstrap[%d]: extracted %d candidates in %.1fs",
+            job_id,
+            len(candidates),
+            time.monotonic() - t0,
+        )
 
         transition_bootstrap_job(job, "windowing", detail="building window index")
         db.commit()
@@ -902,9 +660,7 @@ async def run_bootstrap_job(
             min_window_ratio=settings.bootstrap_min_window_ratio,
         )
         cooccurrence_pairs = (
-            compute_cooccurrence(index)
-            if mode != BOOTSTRAP_MODE_INDEX_REFRESH
-            else []
+            compute_cooccurrence(index) if mode != BOOTSTRAP_MODE_INDEX_REFRESH else []
         )
         logger.info(
             "bootstrap[%d]: windowed in %.1fs → %d important, %d cooccurrence pairs (%s)",
@@ -916,9 +672,13 @@ async def run_bootstrap_job(
         )
 
         if mode == BOOTSTRAP_MODE_INDEX_REFRESH:
-            transition_bootstrap_job(job, "refining", detail="refreshing window index only")
+            transition_bootstrap_job(
+                job, "refining", detail="refreshing window index only"
+            )
         else:
-            transition_bootstrap_job(job, "refining", detail="refining entities and relationships")
+            transition_bootstrap_job(
+                job, "refining", detail="refining entities and relationships"
+            )
         db.commit()
 
         if mode == BOOTSTRAP_MODE_INDEX_REFRESH:
@@ -972,9 +732,13 @@ async def run_bootstrap_job(
         logger.exception("bootstrap background task failed")
         user_error, error_key = _sanitize_bootstrap_error(exc)
         try:
-            failed_job = db.query(BootstrapJob).filter(BootstrapJob.id == job_id).first()
+            failed_job = (
+                db.query(BootstrapJob).filter(BootstrapJob.id == job_id).first()
+            )
             if failed_job and failed_job.status != "failed":
-                transition_bootstrap_job(failed_job, "failed", detail="bootstrap failed", error=user_error)
+                transition_bootstrap_job(
+                    failed_job, "failed", detail="bootstrap failed", error=user_error
+                )
                 failed_job.result = {"message_key": error_key}
                 db.commit()
         except Exception:

@@ -1,5 +1,6 @@
 [tool.pytest.ini_options]
 markers = [
     "contract: tests for deferred/unimplemented modules (update_detector, explorations)",
+    "e2e_llm: real provider end-to-end LLM tests",
 ]
 addopts = "-m 'not contract'"

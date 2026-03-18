@@ -20,7 +20,7 @@ def event_tracking_session(tmp_path):
     orig_env = {}
     env_overrides = {
         "ENABLE_EVENT_TRACKING": "true",
-        "JWT_SECRET_KEY": "test-secret-key",
+        "JWT_SECRET_KEY": "test-secret-key-for-events-mode-32b",
     }
     for key, val in env_overrides.items():
         orig_env[key] = os.environ.get(key)

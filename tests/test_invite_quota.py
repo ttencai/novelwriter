@@ -22,7 +22,7 @@ def hosted_client(tmp_path):
     env_overrides = {
         "DEPLOY_MODE": "hosted",
         "INVITE_CODE": "TEST-CODE-123",
-        "JWT_SECRET_KEY": "test-secret-key-for-hosted-mode",
+        "JWT_SECRET_KEY": "test-secret-key-for-hosted-mode-32b",
         "INITIAL_QUOTA": "5",
         "FEEDBACK_BONUS_QUOTA": "20",
     }
