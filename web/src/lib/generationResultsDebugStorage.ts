@@ -1,5 +1,5 @@
-import type { ContinueDebugSummary, PostcheckWarning } from '@/types/api'
-import { normalizePostcheckWarning } from '@/lib/postcheckWarnings'
+import type { ContinueDebugSummary, PostcheckWarning, ProseWarning } from '@/types/api'
+import { normalizePostcheckWarning, normalizeProseWarning } from '@/lib/postcheckWarnings'
 
 const DEBUG_STORAGE_PREFIX = 'novwr_gen_debug_'
 const WARNING_STORAGE_PREFIX = 'novwr_gen_warnings_'
@@ -25,12 +25,23 @@ function normalizePostcheckWarnings(value: unknown): PostcheckWarning[] {
     .filter((warning): warning is PostcheckWarning => warning != null)
 }
 
+function normalizeProseWarnings(value: unknown): ProseWarning[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(normalizeProseWarning)
+    .filter((warning): warning is ProseWarning => warning != null)
+}
+
 function normalizeContinueDebugSummary(value: unknown): ContinueDebugSummary | null {
   if (!isRecord(value)) return null
 
   const contextChapters = typeof value.context_chapters === 'number' && Number.isFinite(value.context_chapters)
     ? value.context_chapters
     : 0
+  const driftWarnings = normalizePostcheckWarnings(value.drift_warnings)
+  const legacyDriftWarnings = driftWarnings.length === 0
+    ? normalizePostcheckWarnings(value.postcheck_warnings)
+    : []
 
   return {
     context_chapters: contextChapters,
@@ -39,7 +50,8 @@ function normalizeContinueDebugSummary(value: unknown): ContinueDebugSummary | n
     injected_relationships: normalizeStringList(value.injected_relationships),
     relevant_entity_ids: normalizeNumberList(value.relevant_entity_ids),
     ambiguous_keywords_disabled: normalizeStringList(value.ambiguous_keywords_disabled),
-    postcheck_warnings: normalizePostcheckWarnings(value.postcheck_warnings),
+    drift_warnings: driftWarnings.length > 0 ? driftWarnings : legacyDriftWarnings,
+    prose_warnings: normalizeProseWarnings(value.prose_warnings),
   }
 }
 
@@ -63,7 +75,7 @@ export function readGenerationResultsDebug(continuations: string): ContinueDebug
 
 export function readGenerationResultsWarnings(continuations: string): PostcheckWarning[] {
   const debug = readGenerationResultsDebug(continuations)
-  if (debug) return debug.postcheck_warnings
+  if (debug) return debug.drift_warnings
 
   try {
     const raw = sessionStorage.getItem(`${WARNING_STORAGE_PREFIX}${continuations}`)

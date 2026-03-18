@@ -184,6 +184,13 @@ class PostcheckWarning(LocalizedWarningBase):
     evidence: str | None = None
 
 
+class ProseWarning(LocalizedWarningBase):
+    """Post-generation prose-quality warning (non-blocking, paragraph-level)."""
+
+    version: int | None = None
+    evidence: str | None = None
+
+
 class ContinueDebugSummary(BaseModel):
     """Debug summary for context injection (WorldModel)."""
 
@@ -193,7 +200,8 @@ class ContinueDebugSummary(BaseModel):
     injected_relationships: List[str] = Field(default_factory=list)
     relevant_entity_ids: List[int] = Field(default_factory=list)
     ambiguous_keywords_disabled: List[str] = Field(default_factory=list)
-    postcheck_warnings: List[PostcheckWarning] = Field(default_factory=list)
+    drift_warnings: List[PostcheckWarning] = Field(default_factory=list)
+    prose_warnings: List[ProseWarning] = Field(default_factory=list)
 
 
 class ContinueResponse(BaseModel):

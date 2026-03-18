@@ -43,6 +43,7 @@ from app.core.parser import parse_novel_file, read_novel_file_text
 from app.core.llm_request import get_llm_config
 from app.core.context_assembly import apply_writer_context_budget, assemble_writer_context
 from app.core.continuation_postcheck import postcheck_continuation
+from app.core.prose_check import prose_check_continuation
 from app.core.continuation_text import (
     append_user_instruction_for_relevance,
     extract_narrative_constraints,
@@ -351,6 +352,46 @@ def _prepare_continuation_context(
         effective_context_chapters=effective_context_chapters,
         novel_language=novel_language,
     )
+
+
+def _build_advisory_continuation_warning_update(
+    *,
+    writer_ctx: dict[str, Any],
+    recent_text: str,
+    user_prompt: str | None,
+    continuations: List[Any],
+    novel_language: str | None,
+    novel_id: int,
+    request_id: str | None = None,
+) -> dict[str, Any]:
+    """Run advisory continuation postchecks and degrade to no warnings on failure."""
+    try:
+        drift_warnings = postcheck_continuation(
+            writer_ctx=writer_ctx,
+            recent_text=recent_text,
+            user_prompt=user_prompt,
+            continuations=continuations,
+            novel_language=novel_language,
+        )
+        prose_warnings = prose_check_continuation(
+            continuations=continuations,
+            novel_language=novel_language,
+        )
+    except Exception:
+        logger.warning(
+            "continuation postchecks failed (request_id=%s, novel_id=%s)",
+            request_id,
+            novel_id,
+            exc_info=True,
+        )
+        return {}
+
+    update: dict[str, Any] = {}
+    if drift_warnings:
+        update["drift_warnings"] = drift_warnings
+    if prose_warnings:
+        update["prose_warnings"] = prose_warnings
+    return update
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -868,17 +909,16 @@ async def continue_novel_endpoint(
 
     record_event(db, current_user.id, "generation", novel_id=novel_id, meta={"variants": len(continuations)})
 
-    postcheck_warnings = postcheck_continuation(
+    warning_update = _build_advisory_continuation_warning_update(
         writer_ctx=ctx.writer_ctx,
         recent_text=ctx.recent_text,
         user_prompt=req.prompt,
         continuations=continuations,
         novel_language=ctx.novel_language,
+        novel_id=novel_id,
     )
-    if postcheck_warnings:
-        ctx.debug_summary = ctx.debug_summary.model_copy(
-            update={"postcheck_warnings": postcheck_warnings}
-        )
+    if warning_update:
+        ctx.debug_summary = ctx.debug_summary.model_copy(update=warning_update)
 
     return ContinueResponse(continuations=continuations, debug=ctx.debug_summary)
 
@@ -960,30 +1000,25 @@ async def continue_novel_stream_endpoint(
 
                 if event.get("type") == "done":
                     # Post-check is advisory only; never block or fail the stream.
-                    try:
-                        n = int(total_variants or req.num_versions)
-                        conts = [
-                            SimpleNamespace(content=contents_by_variant.get(i, ""))
-                            for i in range(n)
-                        ]
-                        postcheck_warnings = postcheck_continuation(
-                            writer_ctx=ctx.writer_ctx,
-                            recent_text=ctx.recent_text,
-                            user_prompt=req.prompt,
-                            continuations=conts,
-                            novel_language=ctx.novel_language,
+                    n = int(total_variants or req.num_versions)
+                    conts = [
+                        SimpleNamespace(content=contents_by_variant.get(i, ""))
+                        for i in range(n)
+                    ]
+                    warning_update = _build_advisory_continuation_warning_update(
+                        writer_ctx=ctx.writer_ctx,
+                        recent_text=ctx.recent_text,
+                        user_prompt=req.prompt,
+                        continuations=conts,
+                        novel_language=ctx.novel_language,
+                        novel_id=novel_id,
+                        request_id=request_id,
+                    )
+                    if warning_update:
+                        debug_with_warnings = ctx.debug_summary.model_copy(
+                            update=warning_update
                         )
-                        if postcheck_warnings:
-                            debug_with_warnings = ctx.debug_summary.model_copy(
-                                update={"postcheck_warnings": postcheck_warnings}
-                            )
-                            event["debug"] = debug_with_warnings.model_dump()
-                    except Exception:
-                        logger.exception(
-                            "postcheck_continuation failed for stream (request_id=%s, novel_id=%s)",
-                            request_id,
-                            novel_id,
-                        )
+                        event["debug"] = debug_with_warnings.model_dump()
                 yield json.dumps(event, ensure_ascii=False) + "\n"
         finally:
             quota.finalize()

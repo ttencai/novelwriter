@@ -515,7 +515,8 @@ describe('NovelStudioPage', () => {
       injected_systems: [],
       relevant_entity_ids: [1],
       ambiguous_keywords_disabled: [],
-      postcheck_warnings: [],
+      drift_warnings: [],
+      prose_warnings: [],
     })
 
     const queryClient = createTestQueryClient()

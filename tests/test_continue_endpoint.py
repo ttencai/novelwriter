@@ -193,6 +193,56 @@ class TestContinueEndpoint:
         cont = db.query(Continuation).filter(Continuation.novel_id == novel.id).one()
         assert "<world_knowledge>" in cont.prompt_used
 
+    def test_response_debug_uses_split_warning_keys(self, client, novel, monkeypatch):
+        c, _ = client
+
+        import app.core.generator as generator_mod
+
+        async def fake_generate(prompt: str, system_prompt: str = "", max_tokens: int = 0, **kwargs) -> str:
+            del prompt, system_prompt, max_tokens, kwargs
+            return "总之，《永夜渊》现世。"
+
+        monkeypatch.setattr(generator_mod.ai_client, "generate", fake_generate)
+
+        resp = c.post(
+            f"/api/novels/{novel.id}/continue",
+            json={"num_versions": 1, "context_chapters": 2},
+        )
+        assert resp.status_code == 200
+
+        debug = resp.json()["debug"]
+        assert "drift_warnings" in debug
+        assert "prose_warnings" in debug
+        assert "postcheck_warnings" not in debug
+        assert any(w["code"] == "unknown_term_quoted" for w in debug["drift_warnings"])
+        assert any(w["code"] == "summary_tone" for w in debug["prose_warnings"])
+
+    def test_sync_continue_degrades_when_prose_postcheck_raises(self, client, db, novel, monkeypatch):
+        c, _ = client
+
+        import app.api.novels as novels_mod
+
+        def raise_prose_checker(**kwargs):
+            del kwargs
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(novels_mod, "prose_check_continuation", raise_prose_checker)
+
+        resp = c.post(
+            f"/api/novels/{novel.id}/continue",
+            json={"num_versions": 1, "context_chapters": 2},
+        )
+        assert resp.status_code == 200
+
+        data = resp.json()
+        assert len(data["continuations"]) == 1
+        assert data["continuations"][0]["content"] == "续写内容"
+        assert data["debug"]["drift_warnings"] == []
+        assert data["debug"]["prose_warnings"] == []
+
+        cont = db.query(Continuation).filter(Continuation.novel_id == novel.id).one()
+        assert cont.content == "续写内容"
+
     def test_context_chapters_override_affects_relevance(self, client, novel, world):
         c, captured = client
 
@@ -342,6 +392,39 @@ class TestContinueStreamEndpoint:
         assert captured.get("kwargs", {}).get("base_url") == "https://user.example.com/v1"
         assert captured.get("kwargs", {}).get("api_key") == "user-key"
         assert captured.get("kwargs", {}).get("model") == "user-model"
+
+    def test_stream_done_event_uses_split_warning_keys(self, client, novel, monkeypatch):
+        c, _ = client
+
+        import app.core.generator as generator_mod
+
+        async def fake_generate(prompt: str, system_prompt: str = "", max_tokens: int = 0, **kwargs) -> str:
+            del prompt, system_prompt, max_tokens, kwargs
+            return "总之，《永夜渊》现世。"
+
+        async def fake_generate_stream(prompt: str, system_prompt: str = "", max_tokens: int = 0, **kwargs):
+            del prompt, system_prompt, max_tokens, kwargs
+            yield "总之，"
+            yield "《永夜渊》现世。"
+
+        monkeypatch.setattr(generator_mod.ai_client, "generate", fake_generate)
+        monkeypatch.setattr(generator_mod.ai_client, "generate_stream", fake_generate_stream)
+
+        resp = c.post(
+            f"/api/novels/{novel.id}/continue/stream",
+            json={"num_versions": 2, "context_chapters": 2},
+        )
+        assert resp.status_code == 200
+
+        events = [json.loads(ln) for ln in resp.text.splitlines() if ln.strip()]
+        done = next(e for e in events if e["type"] == "done")
+        debug = done["debug"]
+
+        assert "drift_warnings" in debug
+        assert "prose_warnings" in debug
+        assert "postcheck_warnings" not in debug
+        assert any(w["code"] == "unknown_term_quoted" for w in debug["drift_warnings"])
+        assert any(w["code"] == "summary_tone" for w in debug["prose_warnings"])
 
     def test_get_continuations_preserves_requested_order(self, client, novel):
         c, _ = client

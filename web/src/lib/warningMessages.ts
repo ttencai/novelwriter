@@ -13,6 +13,10 @@ function asString(value: string | number | boolean | null | undefined): string {
   return String(value)
 }
 
+function zhLengthUnit(unit: string | number | boolean | null | undefined): string {
+  return asString(unit) === 'words' ? '词' : '字'
+}
+
 const warningMessageCatalog: Record<WarningLocale, Record<string, WarningTranslator>> = {
   zh: {
     'worldpack.import.warning.ambiguous_alias': ({ alias, entity_keys }) =>
@@ -68,6 +72,15 @@ const warningMessageCatalog: Record<WarningLocale, Record<string, WarningTransla
       `重复体系名已丢弃（${asString(name)}）`,
     'world.generate.warning.system_name_conflict': ({ name }) =>
       `体系名已存在，已跳过（${asString(name)}）`,
+
+    'continuation.prosecheck.warning.repeated_ngram': ({ phrase, count }) =>
+      `检测到重复短语“${asString(phrase)}”（出现 ${asString(count)} 次）`,
+    'continuation.prosecheck.warning.long_paragraph': ({ length, unit }) =>
+      `段落偏长（约 ${asString(length)} ${zhLengthUnit(unit)}）`,
+    'continuation.prosecheck.warning.abnormal_sentence_length': ({ length, unit }) =>
+      `句子偏长（约 ${asString(length)} ${zhLengthUnit(unit)}）`,
+    'continuation.prosecheck.warning.summary_tone': ({ phrase }) =>
+      `检测到总结/分析式表达“${asString(phrase)}”，可能不适合正文叙事`,
   },
   en: {},
 }
@@ -82,4 +95,3 @@ export function renderWarningMessage(
   if (translator) return translator(params)
   return warning.message
 }
-

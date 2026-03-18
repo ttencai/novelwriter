@@ -8,6 +8,7 @@ import { NwButton } from '@/components/ui/nw-button'
 import { PlainTextContent, type TextAnnotation } from '@/components/ui/plain-text-content'
 import { FeedbackForm, type FeedbackAnswers } from '@/components/feedback/FeedbackForm'
 import { DriftWarningPopover } from '@/components/generation/DriftWarningPopover'
+import { ProseWarningsPanel } from '@/components/generation/ProseWarningsPanel'
 import { getWhitelist, addToWhitelist } from '@/lib/postcheckWhitelistStorage'
 import { setActiveWarnings } from '@/lib/postcheckActiveWarningsStorage'
 import { getLlmApiErrorMessage } from '@/lib/llmErrorMessages'
@@ -20,7 +21,7 @@ import { api, streamContinuation, ApiError } from '@/services/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { downloadTextFile } from '@/lib/downloadTextFile'
 import { cn } from '@/lib/utils'
-import type { ContinueDebugSummary, ContinueRequest, ContinueResponse, Continuation, PostcheckWarning } from '@/types/api'
+import type { ContinueDebugSummary, ContinueRequest, ContinueResponse, Continuation, PostcheckWarning, ProseWarning } from '@/types/api'
 
 interface VariantState {
   content: string
@@ -114,9 +115,9 @@ export function ContinuationResultsStage({
     let warnings: PostcheckWarning[] | undefined
     if (isStreamMode) {
       if (!isDone) return []
-      warnings = streamDebug?.postcheck_warnings
-    } else if (legacyResponse?.debug?.postcheck_warnings?.length) {
-      warnings = legacyResponse.debug.postcheck_warnings
+      warnings = streamDebug?.drift_warnings
+    } else if (legacyResponse?.debug?.drift_warnings?.length) {
+      warnings = legacyResponse.debug.drift_warnings
     } else if (reloadedWarnings.length > 0) {
       warnings = reloadedWarnings
     }
@@ -331,7 +332,7 @@ export function ContinuationResultsStage({
       {
         onSuccess: (chapter) => {
       const currentDebug = isStreamMode ? streamDebug : legacyResponse?.debug ?? persistedDebug ?? state?.studioResultsDebug ?? null
-      const allWarnings = currentDebug?.postcheck_warnings ?? (reloadedWarnings.length > 0 ? reloadedWarnings : undefined)
+      const allWarnings = currentDebug?.drift_warnings ?? (reloadedWarnings.length > 0 ? reloadedWarnings : undefined)
       if (allWarnings?.length) {
         const targetVersion = activeTab + 1
         const activeWarnings = allWarnings.filter(
@@ -666,6 +667,18 @@ export function ContinuationResultsStage({
             )}
           </button>
         ) : null}
+
+        {(() => {
+          const proseWarnings: ProseWarning[] | undefined = isStreamMode
+            ? (isDone ? streamDebug?.prose_warnings : undefined)
+            : (legacyResponse?.debug?.prose_warnings ?? persistedDebug?.prose_warnings ?? state?.studioResultsDebug?.prose_warnings)
+          const targetVersion = activeTab + 1
+          const filtered = proseWarnings?.filter((w) => w.version == null || w.version === targetVersion) ?? []
+          if (filtered.length === 0) return null
+          return (
+            <ProseWarningsPanel warnings={filtered} />
+          )
+        })()}
       </div>
 
       {showFeedbackForm ? (

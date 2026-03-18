@@ -79,6 +79,15 @@ export interface PostcheckWarning {
   evidence: string | null
 }
 
+export interface ProseWarning {
+  code: string
+  message: string
+  message_key: string
+  message_params: Record<string, string | number | boolean | null>
+  version: number | null
+  evidence: string | null
+}
+
 export interface ContinueDebugSummary {
   context_chapters: number
   injected_systems: string[]
@@ -86,7 +95,8 @@ export interface ContinueDebugSummary {
   injected_relationships: string[]
   relevant_entity_ids: number[]
   ambiguous_keywords_disabled: string[]
-  postcheck_warnings: PostcheckWarning[]
+  drift_warnings: PostcheckWarning[]
+  prose_warnings: ProseWarning[]
 }
 
 export interface Continuation {
