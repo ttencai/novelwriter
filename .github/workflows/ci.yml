@@ -35,7 +35,7 @@ jobs:
         run: ruff check app tests
 
       - name: Bootstrap invariant gate (backend)
-        run: pytest tests/test_bootstrap_invariants.py -q
+        run: pytest tests/bootstrap/test_invariants.py -q
 
       - name: Run pytest
         run: pytest tests/
