@@ -115,6 +115,7 @@ fi
 "$NOVWR_BIN" doctor --dir "$INSTALL_DIR"
 "$NOVWR_BIN" uninstall --dir "$INSTALL_DIR" --delete-data
 INSTALL_DIR=""
+unset NOVWR_HOME NOVWR_IMAGE NOVWR_BIND_HOST NOVWR_PORT NOVWR_PACKAGE_SPEC NOVWR_UV_VERSION
 
 echo "[selfhost-smoke] official selfhost compose flow"
 COMPOSE_DIR="$(mktemp -d)"

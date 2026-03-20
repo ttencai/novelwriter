@@ -166,6 +166,7 @@ def test_selfhost_smoke_script_covers_wheel_installer_and_compose_flows():
     assert 'curl -fsSL "file://${ROOT_DIR}/install.sh" | bash' in script
     assert 'export NOVWR_UV_VERSION="$(tr -d ' in script
     assert '"$NOVWR_BIN" doctor --dir "$INSTALL_DIR"' in script
+    assert "unset NOVWR_HOME NOVWR_IMAGE NOVWR_BIND_HOST NOVWR_PORT NOVWR_PACKAGE_SPEC NOVWR_UV_VERSION" in script
     assert 'cp deploy/selfhost/docker-compose.yml "$COMPOSE_DIR/docker-compose.yml"' in script
     assert 'docker compose --project-directory "$COMPOSE_DIR" --project-name "$COMPOSE_PROJECT_NAME" up -d' in script
     assert 'dump_compose_debug()' in script
