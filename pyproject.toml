@@ -1,3 +1,51 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "novwr"
+version = "0.1.0"
+description = "Long-form novel writing engine with world-model-driven generation."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "alembic>=1.13.0",
+    "fastapi>=0.109.0",
+    "jieba>=0.42.1",
+    "msgpack>=1.0.8",
+    "openai>=1.50.0",
+    "passlib[bcrypt]>=1.7.4",
+    "psycopg2-binary>=2.9.9",
+    "pyahocorasick>=2.0.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.6.0",
+    "PyJWT>=2.8.0",
+    "python-multipart==0.0.6",
+    "slowapi>=0.1.9",
+    "sqlalchemy>=2.0.36",
+    "structlog>=24.1.0",
+    "uvicorn>=0.24.0",
+]
+
+[project.scripts]
+novwr = "app.cli:main"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.0.0",
+    "pre-commit",
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[tool.uv]
+package = true
+required-version = "==0.10.4"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
 [tool.pytest.ini_options]
 markers = [
     "contract: tests for deferred/unimplemented modules (update_detector, explorations)",

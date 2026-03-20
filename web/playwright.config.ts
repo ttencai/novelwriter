@@ -38,7 +38,7 @@ export const integrationConfig = defineConfig({
       reuseExistingServer: !process.env.CI,
     },
     {
-      command: 'cd .. && sh -c "if [ -x .venv/bin/python ]; then .venv/bin/python -m uvicorn app.main:app --port 8000; else python -m uvicorn app.main:app --port 8000; fi"',
+      command: 'cd .. && ./scripts/uv_run.sh uvicorn app.main:app --port 8000',
       url: 'http://localhost:8000/api/health',
       reuseExistingServer: !process.env.CI,
     },

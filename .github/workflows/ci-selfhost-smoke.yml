@@ -1,0 +1,22 @@
+name: Selfhost smoke
+
+on:
+  workflow_call:
+
+jobs:
+  selfhost-install-smoke:
+    name: Selfhost install smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version-file: .uv-version
+          enable-cache: true
+          cache-python: true
+
+      - name: PR-gated selfhost smoke
+        run: ./scripts/selfhost_smoke.sh

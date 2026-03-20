@@ -22,4 +22,5 @@ if [[ "$#" -eq 0 ]]; then
 fi
 
 cd "$ROOT_DIR"
-exec uv run --python "$PY_BIN" "$@"
+export UV_PROJECT_ENVIRONMENT="$VENV_DIR"
+exec uv run --project "$ROOT_DIR" --python "$PY_BIN" --frozen "$@"

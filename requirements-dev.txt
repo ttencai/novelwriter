@@ -1,6 +1,0 @@
-ruff
-pre-commit
-hypothesis>=6.0.0
-pytest
-pytest-asyncio
-alembic>=1.13.0
