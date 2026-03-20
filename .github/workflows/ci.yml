@@ -19,7 +19,7 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
         with:
-          version-file: .uv-version
+          version-file: pyproject.toml
           enable-cache: true
           cache-python: true
 
@@ -121,7 +121,7 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
         with:
-          version-file: .uv-version
+          version-file: pyproject.toml
           enable-cache: true
           cache-python: true
 

@@ -138,7 +138,7 @@ def test_ci_workflow_uses_uv_for_backend_jobs():
     workflow = _read(".github/workflows/ci.yml")
 
     assert "astral-sh/setup-uv@v7" in workflow
-    assert "version-file: .uv-version" in workflow
+    assert "version-file: pyproject.toml" in workflow
     assert "./scripts/setup_python_env.sh" in workflow
     assert "./scripts/uv_run.sh pytest tests/" in workflow
     assert "pip install -r requirements.txt" not in workflow
@@ -151,7 +151,7 @@ def test_selfhost_smoke_workflow_gates_pr_installer_and_compose_paths():
     assert "workflow_call:" in workflow
     assert "Selfhost install smoke" in workflow
     assert "astral-sh/setup-uv@v7" in workflow
-    assert "version-file: .uv-version" in workflow
+    assert "version-file: pyproject.toml" in workflow
     assert "./scripts/selfhost_smoke.sh" in workflow
 
 
