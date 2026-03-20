@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Outlet, Navigate, useLocation } from 'rea
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { PerformanceModeProvider } from '@/contexts/PerformanceModeContext'
+import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
 import { PageShell } from '@/components/layout/PageShell'
 import { Home } from '@/pages/Home'
 import { LibraryPage } from '@/pages/LibraryPage'
@@ -53,40 +54,42 @@ function RequireAuth() {
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <PerformanceModeProvider>
-          <AuthProvider>
-            <Suspense fallback={null}>
-              <Routes>
-                {/* Old-layout pages */}
-                <Route element={<Layout />}>
-                  <Route path="/" element={<Home />} />
-                  <Route path="/terms" element={<Terms />} />
-                  <Route path="/privacy" element={<Privacy />} />
-                  <Route path="/copyright" element={<CopyrightNotice />} />
-                  <Route element={<RequireAuth />}>
-                    <Route path="/settings" element={<Settings />} />
-                  </Route>
-                </Route>
-
-                <Route element={<RequireAuth />}>
-                  <Route path="/library" element={<LibraryPage />} />
-                  {/* Novel routes share one Studio/Atlas shell so shell state and agent sessions survive surface switches. */}
-                  <Route element={<NovelShell />}>
-                    <Route element={<Layout />}>
-                      <Route path="/world/:novelId" element={<NovelAtlasPage />} />
+      <UiLocaleProvider>
+        <BrowserRouter>
+          <PerformanceModeProvider>
+            <AuthProvider>
+              <Suspense fallback={null}>
+                <Routes>
+                  {/* Old-layout pages */}
+                  <Route element={<Layout />}>
+                    <Route path="/" element={<Home />} />
+                    <Route path="/terms" element={<Terms />} />
+                    <Route path="/privacy" element={<Privacy />} />
+                    <Route path="/copyright" element={<CopyrightNotice />} />
+                    <Route element={<RequireAuth />}>
+                      <Route path="/settings" element={<Settings />} />
                     </Route>
-                    <Route path="/novel/:novelId" element={<NovelStudioPage />} />
-                    <Route path="/novel/:novelId/chapter/:chapterNum/results" element={<GenerationResults />} />
                   </Route>
-                </Route>
-                {/* Login (standalone) */}
-                <Route path="/login" element={<Login />} />
-              </Routes>
-            </Suspense>
-          </AuthProvider>
-        </PerformanceModeProvider>
-      </BrowserRouter>
+
+                  <Route element={<RequireAuth />}>
+                    <Route path="/library" element={<LibraryPage />} />
+                    {/* Novel routes share one Studio/Atlas shell so shell state and agent sessions survive surface switches. */}
+                    <Route element={<NovelShell />}>
+                      <Route element={<Layout />}>
+                        <Route path="/world/:novelId" element={<NovelAtlasPage />} />
+                      </Route>
+                      <Route path="/novel/:novelId" element={<NovelStudioPage />} />
+                      <Route path="/novel/:novelId/chapter/:chapterNum/results" element={<GenerationResults />} />
+                    </Route>
+                  </Route>
+                  {/* Login (standalone) */}
+                  <Route path="/login" element={<Login />} />
+                </Routes>
+              </Suspense>
+            </AuthProvider>
+          </PerformanceModeProvider>
+        </BrowserRouter>
+      </UiLocaleProvider>
     </QueryClientProvider>
   )
 }

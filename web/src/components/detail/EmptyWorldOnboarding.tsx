@@ -1,6 +1,7 @@
 import { Sparkles, BookOpen } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { GlassSurface } from '@/components/ui/glass-surface'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 
 export function EmptyWorldOnboarding({
   className,
@@ -17,15 +18,16 @@ export function EmptyWorldOnboarding({
   bootstrapPending?: boolean
   bootstrapError?: string | null
 }) {
+  const { t } = useUiLocale()
   return (
     <div className={cn('flex flex-1 items-center justify-center px-8 py-10', className)} data-testid="world-onboarding">
       <div className="w-full max-w-4xl space-y-6">
         <div className="space-y-2">
           <div className="text-2xl font-light text-foreground tracking-tight">
-            先构建世界观，再开始写作
+            {t('worldModel.onboarding.title')}
           </div>
           <div className="text-sm text-muted-foreground">
-            你可以从设定文本生成草稿，或从章节中自动提取实体与关系。
+            {t('worldModel.onboarding.description')}
           </div>
         </div>
 
@@ -46,9 +48,9 @@ export function EmptyWorldOnboarding({
                   <Sparkles className="h-5 w-5" />
                 </div>
                 <div className="flex-1 space-y-1">
-                  <div className="text-base font-semibold text-foreground">从设定生成</div>
+                  <div className="text-base font-semibold text-foreground">{t('worldModel.onboarding.generateTitle')}</div>
                   <div className="text-sm text-muted-foreground">
-                    粘贴世界观设定，让 AI 提取实体、关系与体系草稿，然后你再逐条确认。
+                    {t('worldModel.onboarding.generateDescription')}
                   </div>
                 </div>
               </div>
@@ -72,12 +74,12 @@ export function EmptyWorldOnboarding({
                   <BookOpen className="h-5 w-5" />
                 </div>
                 <div className="flex-1 space-y-1">
-                  <div className="text-base font-semibold text-foreground">从章节提取</div>
+                  <div className="text-base font-semibold text-foreground">{t('worldModel.onboarding.extractTitle')}</div>
                   <div className="text-sm text-muted-foreground">
-                    从已上传的章节内容中自动提取实体与关系草稿。
+                    {t('worldModel.onboarding.extractDescription')}
                   </div>
                   {bootstrapPending ? (
-                    <div className="text-xs text-muted-foreground pt-1">处理中...</div>
+                    <div className="text-xs text-muted-foreground pt-1">{t('worldModel.common.processing')}</div>
                   ) : null}
                 </div>
               </div>
@@ -98,7 +100,7 @@ export function EmptyWorldOnboarding({
             onClick={onDismiss}
             data-testid="world-onboarding-dismiss"
           >
-            前往世界模型页稍后添加 →
+            {t('worldModel.onboarding.dismiss')}
           </button>
         </div>
       </div>

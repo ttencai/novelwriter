@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import { LABELS } from '@/constants/labels'
 import { useWorldRelationships, useCreateRelationship, useUpdateRelationship, useDeleteRelationship, useConfirmRelationships } from '@/hooks/world/useRelationships'
 import { useWorldEntities } from '@/hooks/world/useEntities'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { StarGraph } from './StarGraph'
 import { RelationshipInspector } from './RelationshipInspector'
 import { Button } from '@/components/ui/button'
@@ -80,6 +80,7 @@ export function RelationshipsTab({
   creating?: boolean
   onCreatingChange?: (open: boolean) => void
 }) {
+  const { t } = useUiLocale()
   const { data: relationships = [] } = useWorldRelationships(
     novelId,
     selectedEntityId !== null ? { entity_id: selectedEntityId } : undefined,
@@ -153,7 +154,7 @@ export function RelationshipsTab({
   if (selectedEntityId === null) {
     return (
       <div className="flex-1 flex items-center justify-center text-muted-foreground">
-        {LABELS.REL_EMPTY}
+        {t('worldModel.relationship.empty')}
       </div>
     )
   }
@@ -176,16 +177,18 @@ export function RelationshipsTab({
       <BottomSheet open={creating} onClose={() => setCreating(false)}>
         <div className="space-y-3">
           <div className="space-y-0.5">
-            <h3 className="font-semibold">{LABELS.REL_NEW}</h3>
+            <h3 className="font-semibold">{t('worldModel.relationship.new')}</h3>
             <div className="text-xs text-muted-foreground">
-              从 <span className="text-foreground">{sourceName ?? selectedEntityId}</span>{' '}
-              到 <span className="text-foreground">{selectedTarget?.name ?? '（请选择目标实体）'}</span>
+              {t('worldModel.relationship.fromTo', {
+                source: sourceName ?? selectedEntityId,
+                target: selectedTarget?.name ?? t('worldModel.relationship.selectTargetFallback'),
+              })}
             </div>
           </div>
           <div className="space-y-2">
             <Input
               ref={targetSearchRef}
-              placeholder="搜索目标实体..."
+              placeholder={t('worldModel.relationship.searchTargetPlaceholder')}
               value={targetSearch}
               onChange={(e) => setTargetSearch(e.target.value)}
               className="h-9 text-sm bg-transparent border-[var(--nw-glass-border)] text-foreground placeholder:text-muted-foreground/70 focus-visible:ring-accent focus-visible:ring-offset-0"
@@ -217,19 +220,19 @@ export function RelationshipsTab({
                 </button>
               ))}
               {filteredTargets.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-muted-foreground">没有匹配的目标实体</div>
+                <div className="px-3 py-2 text-xs text-muted-foreground">{t('worldModel.relationship.noMatchingTargets')}</div>
               ) : null}
             </div>
           </div>
           <input
             className="w-full rounded border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-xl px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-0"
-            placeholder="关系标签"
+            placeholder={t('worldModel.relationship.labelPlaceholder')}
             value={newLabel}
             onChange={(e) => setNewLabel(e.target.value)}
           />
           <div className="flex justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={() => setCreating(false)}>{LABELS.CANCEL}</Button>
-            <Button size="sm" onClick={handleCreate} disabled={!newTargetId || !newLabel}>{LABELS.CONFIRM}</Button>
+            <Button variant="outline" size="sm" onClick={() => setCreating(false)}>{t('dialog.cancel')}</Button>
+            <Button size="sm" onClick={handleCreate} disabled={!newTargetId || !newLabel}>{t('dialog.confirm')}</Button>
           </div>
         </div>
       </BottomSheet>

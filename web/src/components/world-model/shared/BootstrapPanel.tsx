@@ -9,17 +9,9 @@ import { getLlmApiErrorMessage } from '@/lib/llmErrorMessages'
 import { getWindowIndexBootstrapStatusMeta } from '@/lib/windowIndexStatus'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { LABELS } from '@/constants/labels'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { ApiError } from '@/services/api'
 import type { BootstrapStatus, BootstrapTriggerRequest } from '@/types/api'
-
-const STEP_LABELS: Record<string, string> = {
-  pending: LABELS.BOOTSTRAP_STEP_PENDING,
-  tokenizing: LABELS.BOOTSTRAP_STEP_TOKENIZING,
-  extracting: LABELS.BOOTSTRAP_STEP_EXTRACTING,
-  windowing: LABELS.BOOTSTRAP_STEP_WINDOWING,
-  refining: LABELS.BOOTSTRAP_STEP_REFINING,
-}
 
 const TOTAL_STEPS = 5
 
@@ -42,6 +34,7 @@ function isTerminal(status: BootstrapStatus): boolean {
 type BootstrapPanelVariant = 'sidebar' | 'page'
 
 export function BootstrapPanel({ novelId, variant = 'sidebar' }: { novelId: number; variant?: BootstrapPanelVariant }) {
+  const { locale, t } = useUiLocale()
   const { data: job, isLoading } = useBootstrapStatus(novelId)
   const { data: indexState } = useNovelWindowIndex(novelId)
   const trigger = useTriggerBootstrap(novelId)
@@ -57,14 +50,21 @@ export function BootstrapPanel({ novelId, variant = 'sidebar' }: { novelId: numb
     )
   )
   const isInitialized = Boolean(job?.initialized ?? initializedFallback)
-  const indexStatusMeta = getWindowIndexBootstrapStatusMeta(indexState)
+  const indexStatusMeta = getWindowIndexBootstrapStatusMeta(indexState, locale)
   const indexStatusClassName = indexStatusMeta.tone === 'warning'
     ? 'text-[hsl(var(--color-warning))]'
     : 'text-muted-foreground/75'
+  const stepLabels: Record<string, string> = {
+    pending: t('worldModel.bootstrap.step.pending'),
+    tokenizing: t('worldModel.bootstrap.step.tokenizing'),
+    extracting: t('worldModel.bootstrap.step.extracting'),
+    windowing: t('worldModel.bootstrap.step.windowing'),
+    refining: t('worldModel.bootstrap.step.refining'),
+  }
 
   const renderRowCopy = (options?: { summary?: string | null }) => (
     <span className="flex flex-1 flex-col text-left">
-      <span>从章节提取</span>
+      <span>{t('worldModel.bootstrap.extractFromChapters')}</span>
       {options?.summary ? (
         <span className="text-[11px] opacity-70">{options.summary}</span>
       ) : null}
@@ -94,14 +94,14 @@ export function BootstrapPanel({ novelId, variant = 'sidebar' }: { novelId: numb
             return
           }
           if (err.code === 'bootstrap_already_running') {
-            toast(LABELS.BOOTSTRAP_SCANNING)
+            toast(t('worldModel.common.processing'))
           } else if (err.code === 'bootstrap_no_text') {
-            toast(LABELS.BOOTSTRAP_NO_TEXT)
+            toast(t('worldModel.bootstrap.noText'))
           } else {
-            toast(LABELS.ERROR_BOOTSTRAP_TRIGGER_FAILED)
+            toast(t('worldModel.bootstrap.triggerFailed'))
           }
         } else {
-          toast(LABELS.ERROR_BOOTSTRAP_TRIGGER_FAILED)
+          toast(t('worldModel.bootstrap.triggerFailed'))
         }
       },
     })
@@ -125,9 +125,9 @@ export function BootstrapPanel({ novelId, variant = 'sidebar' }: { novelId: numb
     <ConfirmDialog
       open={reextractConfirmOpen}
       tone="destructive"
-      title={LABELS.BOOTSTRAP_REEXTRACT_CONFIRM_TITLE}
-      description={LABELS.BOOTSTRAP_REEXTRACT_CONFIRM_DESC}
-      confirmText={LABELS.BOOTSTRAP_REEXTRACT_CONFIRM}
+      title={t('worldModel.bootstrap.confirmTitle')}
+      description={t('worldModel.bootstrap.confirmDescription')}
+      confirmText={t('worldModel.bootstrap.confirmAction')}
       onConfirm={handleConfirmReextract}
       onClose={() => setReextractConfirmOpen(false)}
     />
@@ -146,7 +146,7 @@ export function BootstrapPanel({ novelId, variant = 'sidebar' }: { novelId: numb
     // Running
     if (job && isRunning(job.status)) {
       const progress = job.progress.step / TOTAL_STEPS
-      const stepLabel = STEP_LABELS[job.status] ?? job.progress.detail
+      const stepLabel = stepLabels[job.status] ?? job.progress.detail
       return (
         <div className="px-3 py-2.5 space-y-1.5">
           <div className="flex items-center gap-2">
@@ -176,7 +176,7 @@ export function BootstrapPanel({ novelId, variant = 'sidebar' }: { novelId: numb
           >
             <BookOpen className="h-4 w-4 shrink-0 opacity-70" />
             <span className="flex flex-1 flex-col text-left">
-              <span className="text-[hsl(var(--color-warning))]">{LABELS.BOOTSTRAP_FAILED} · 重试</span>
+              <span className="text-[hsl(var(--color-warning))]">{t('worldModel.bootstrap.failed')} · {t('worldModel.common.retry')}</span>
               <span className={`text-[10px] ${indexStatusClassName}`}>{indexStatusMeta.text}</span>
             </span>
             <ChevronRight className="h-3.5 w-3.5 shrink-0 opacity-40" />
@@ -189,8 +189,11 @@ export function BootstrapPanel({ novelId, variant = 'sidebar' }: { novelId: numb
     // Completed
     if (job?.status === 'completed') {
       const summary = job.result.index_refresh_only
-        ? LABELS.BOOTSTRAP_COMPLETED_INDEX_REFRESH
-        : `${job.result.entities_found} 实体 · ${job.result.relationships_found} 关系`
+        ? t('worldModel.bootstrap.completedIndexRefresh')
+        : t('worldModel.bootstrap.summaryCounts', {
+          entities: job.result.entities_found,
+          relationships: job.result.relationships_found,
+        })
       return (
         <>
           <button
@@ -238,11 +241,11 @@ export function BootstrapPanel({ novelId, variant = 'sidebar' }: { novelId: numb
           onClick={handleReextract}
           disabled={trigger.isPending}
         >
-          {LABELS.BOOTSTRAP_REEXTRACT}
+          {t('worldModel.bootstrap.reextractDrafts')}
         </Button>
       ) : (
         <Button size="sm" variant={primaryVariant} className="h-7 text-xs" onClick={handleInitialExtraction} disabled={trigger.isPending}>
-          {LABELS.BOOTSTRAP_INITIAL_EXTRACTION}
+          {t('worldModel.bootstrap.extractFromChapters')}
         </Button>
       )}
     </div>
@@ -260,7 +263,7 @@ export function BootstrapPanel({ novelId, variant = 'sidebar' }: { novelId: numb
 
   if (job && isRunning(job.status)) {
     const progress = job.progress.step / TOTAL_STEPS
-    const stepLabel = STEP_LABELS[job.status] ?? job.progress.detail
+    const stepLabel = stepLabels[job.status] ?? job.progress.detail
     return (
       <div className={shellClass + ' space-y-1'}>
         <div className="flex items-center gap-3">
@@ -271,7 +274,7 @@ export function BootstrapPanel({ novelId, variant = 'sidebar' }: { novelId: numb
             />
           </div>
           <Button size="sm" variant="ghost" disabled className="h-7 text-xs">
-            {LABELS.BOOTSTRAP_SCANNING}
+            {t('worldModel.common.processing')}
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">{stepLabel}</p>
@@ -284,7 +287,7 @@ export function BootstrapPanel({ novelId, variant = 'sidebar' }: { novelId: numb
       <>
         <div className={shellClass + ' flex items-center gap-3'}>
           <div className="flex flex-col gap-0.5">
-            <span className="text-xs text-[hsl(var(--color-warning))]">{LABELS.BOOTSTRAP_FAILED}</span>
+            <span className="text-xs text-[hsl(var(--color-warning))]">{t('worldModel.bootstrap.failed')}</span>
             <span className={`text-[11px] ${indexStatusClassName}`}>{indexStatusMeta.text}</span>
           </div>
           {renderPrimaryAction('outline')}
@@ -296,8 +299,11 @@ export function BootstrapPanel({ novelId, variant = 'sidebar' }: { novelId: numb
 
   if (job?.status === 'completed') {
     const completionText = job.result.index_refresh_only
-      ? LABELS.BOOTSTRAP_COMPLETED_INDEX_REFRESH
-      : LABELS.BOOTSTRAP_COMPLETED_EXTRACTION(job.result.entities_found, job.result.relationships_found)
+      ? t('worldModel.bootstrap.completedIndexRefresh')
+      : t('worldModel.bootstrap.summaryCounts', {
+        entities: job.result.entities_found,
+        relationships: job.result.relationships_found,
+      })
     return (
       <>
         <div className={shellClass + ' flex items-center gap-3'}>

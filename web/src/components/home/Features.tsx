@@ -1,42 +1,41 @@
 import { Globe, Brain, GitBranch, type LucideIcon } from "lucide-react"
 import { GlassCard } from "@/components/GlassCard"
-
-const features: {
-    title: string
-    description: string
-    icon: LucideIcon
-}[] = [
-    {
-        title: "世界模型",
-        description:
-            "构建角色、关系、规则体系——AI 基于结构化知识图谱理解你的世界，而非简单的上下文窗口。",
-        icon: Globe,
-    },
-    {
-        title: "语境感知续写",
-        description:
-            "不是盲目生成，而是基于世界模型的连贯写作。AI 知道谁在哪里、发生了什么、规则是什么。",
-        icon: Brain,
-    },
-    {
-        title: "多版本对比",
-        description:
-            "一次生成多个续写版本，对比选择最佳方案。快速迭代，找到最契合故事走向的那一版。",
-        icon: GitBranch,
-    },
-]
+import { useUiLocale } from "@/contexts/UiLocaleContext"
 
 export function Features() {
+    const { t } = useUiLocale()
+    const features: {
+        title: string
+        description: string
+        icon: LucideIcon
+    }[] = [
+        {
+            title: t('home.features.worldModel.title'),
+            description: t('home.features.worldModel.description'),
+            icon: Globe,
+        },
+        {
+            title: t('home.features.continuation.title'),
+            description: t('home.features.continuation.description'),
+            icon: Brain,
+        },
+        {
+            title: t('home.features.compare.title'),
+            description: t('home.features.compare.description'),
+            icon: GitBranch,
+        },
+    ]
+
     return (
         <section id="features" className="w-full px-12 py-24">
             <div className="mx-auto flex max-w-6xl flex-col items-center gap-12">
                 {/* Header */}
                 <div className="flex flex-col items-center gap-3 text-center">
                     <h2 className="font-mono text-4xl font-bold text-foreground">
-                        核心能力
+                        {t('home.features.title')}
                     </h2>
                     <p className="max-w-[500px] font-sans text-base leading-relaxed text-muted-foreground">
-                        不只是文本生成器——NovWr 让 AI 真正理解你的故事世界
+                        {t('home.features.description')}
                     </p>
                 </div>
 

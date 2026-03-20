@@ -1,3 +1,9 @@
+import {
+  DEFAULT_UI_LOCALE,
+  normalizeUiLocale,
+  readDocumentUiLocale,
+} from '@/lib/uiLocale'
+
 export type CopilotMode = 'research' | 'current_entity' | 'draft_cleanup'
 export type CopilotScope = 'whole_book' | 'current_entity' | 'current_tab'
 export type CopilotContextTab = 'entities' | 'relationships' | 'review' | 'systems'
@@ -12,7 +18,7 @@ export type CopilotContextStage =
   | 'review'
 export type CopilotTargetTab = 'entities' | 'relationships' | 'systems' | 'review'
 export type CopilotReviewKind = 'entities' | 'relationships' | 'systems'
-export const DEFAULT_COPILOT_INTERACTION_LOCALE = 'zh'
+export const DEFAULT_COPILOT_INTERACTION_LOCALE = DEFAULT_UI_LOCALE
 
 interface CopilotUiContextData {
   surface?: CopilotContextSurface
@@ -195,21 +201,11 @@ export interface CopilotRun {
 }
 
 export function normalizeCopilotInteractionLocale(raw: string | null | undefined) {
-  const normalized = (raw ?? '').trim().toLowerCase()
-  if (!normalized) return DEFAULT_COPILOT_INTERACTION_LOCALE
-  const base = normalized.split(/[-_]/)[0]?.trim()
-  return base || DEFAULT_COPILOT_INTERACTION_LOCALE
+  return normalizeUiLocale(raw, DEFAULT_COPILOT_INTERACTION_LOCALE)
 }
 
 export function getDefaultCopilotInteractionLocale() {
-  if (typeof document !== 'undefined') {
-    const documentLocale = document.documentElement.lang.trim()
-    if (documentLocale) return normalizeCopilotInteractionLocale(documentLocale)
-  }
-  if (typeof navigator !== 'undefined') {
-    return normalizeCopilotInteractionLocale(navigator.language)
-  }
-  return DEFAULT_COPILOT_INTERACTION_LOCALE
+  return readDocumentUiLocale() ?? DEFAULT_COPILOT_INTERACTION_LOCALE
 }
 
 export function buildCopilotSessionSignature(

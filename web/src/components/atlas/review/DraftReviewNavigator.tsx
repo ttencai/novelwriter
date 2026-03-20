@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { useWorldEntities } from '@/hooks/world/useEntities'
 import { useWorldRelationships } from '@/hooks/world/useRelationships'
 import { useWorldSystems } from '@/hooks/world/useSystems'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import type { DraftReviewKind } from '@/components/atlas/review/DraftReviewSummaryCard'
 import { useNovelCopilot } from '@/components/novel-copilot/NovelCopilotContext'
 import { buildDraftCleanupCopilotLaunchArgs } from '@/components/novel-copilot/novelCopilotLauncher'
@@ -29,6 +30,7 @@ export function DraftReviewNavigator({
   onSelectItem: (kind: DraftReviewKind, id: number) => void
   className?: string
 }) {
+  const { t } = useUiLocale()
   const { data: allEntities = [] } = useWorldEntities(novelId)
   const entityMap = useMemo(() => new Map(allEntities.map((e) => [e.id, e])), [allEntities])
   const copilot = useNovelCopilot()
@@ -116,7 +118,7 @@ export function DraftReviewNavigator({
     >
       <div className="shrink-0 p-4 space-y-3">
         <div className="flex items-center gap-2">
-          <div className="text-sm font-medium text-foreground">草稿审核</div>
+          <div className="text-sm font-medium text-foreground">{t('worldModel.common.draftReview')}</div>
           <span className="rounded-full border border-[var(--nw-glass-border)] px-2 py-0.5 text-xs tabular-nums text-[hsl(var(--color-status-draft))]">
             {totalCount}
           </span>
@@ -134,7 +136,7 @@ export function DraftReviewNavigator({
         </div>
 
         <Input
-          placeholder="搜索草稿..."
+          placeholder={t('worldModel.common.searchDrafts')}
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           className="h-9 text-sm bg-transparent border-[var(--nw-glass-border)] text-foreground placeholder:text-muted-foreground/70 focus-visible:ring-accent focus-visible:ring-offset-0"
@@ -143,20 +145,20 @@ export function DraftReviewNavigator({
 
         <div className="space-y-1">
           <KindButton active={kind === 'entities'} onClick={() => onKindChange('entities')}>
-            实体 <span className="ml-auto tabular-nums">{draftEntities.length}</span>
+            {t('worldModel.common.entities')} <span className="ml-auto tabular-nums">{draftEntities.length}</span>
           </KindButton>
           <KindButton active={kind === 'relationships'} onClick={() => onKindChange('relationships')}>
-            关系 <span className="ml-auto tabular-nums">{draftRelationships.length}</span>
+            {t('worldModel.common.relationships')} <span className="ml-auto tabular-nums">{draftRelationships.length}</span>
           </KindButton>
           <KindButton active={kind === 'systems'} onClick={() => onKindChange('systems')}>
-            体系 <span className="ml-auto tabular-nums">{draftSystems.length}</span>
+            {t('worldModel.common.systems')} <span className="ml-auto tabular-nums">{draftSystems.length}</span>
           </KindButton>
         </div>
       </div>
 
       <div className="nw-scrollbar-thin flex-1 min-h-0 overflow-y-auto px-2 pb-3">
         {listItems.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-muted-foreground">没有匹配项</div>
+          <div className="px-3 py-2 text-xs text-muted-foreground">{t('worldModel.draftReview.noMatches')}</div>
         ) : (
           listItems.map((item) => (
             <button

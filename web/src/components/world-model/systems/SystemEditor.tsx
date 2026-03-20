@@ -7,8 +7,8 @@ import { LegacyGraphReadonly } from '@/components/world-model/systems/LegacyGrap
 import { TimelineEditor } from '@/components/world-model/systems/TimelineEditor'
 import { ListEditor } from '@/components/world-model/systems/ListEditor'
 import { useUpdateSystem, useDeleteSystem } from '@/hooks/world/useSystems'
-import { LABELS } from '@/constants/labels'
 import { isLegacyGraphDisplayType } from '@/lib/worldSystemDisplay'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import type { WorldSystem } from '@/types/api'
 
 type HierarchyEditorData = Parameters<typeof HierarchyEditor>[0]['data']
@@ -20,6 +20,7 @@ export function SystemEditor({ novelId, system, onBack }: {
   system: WorldSystem
   onBack: () => void
 }) {
+  const { t } = useUiLocale()
   const updateSystem = useUpdateSystem(novelId)
   const deleteSystem = useDeleteSystem(novelId)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -44,7 +45,7 @@ export function SystemEditor({ novelId, system, onBack }: {
   } else {
     editorContent = (
       <div className="rounded-2xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] px-4 py-3 text-sm text-muted-foreground">
-        当前体系类型无法编辑，请检查数据是否已经迁移。
+        {t('worldModel.system.unsupportedType')}
       </div>
     )
   }
@@ -52,7 +53,7 @@ export function SystemEditor({ novelId, system, onBack }: {
   return (
     <div className="max-w-5xl mx-auto px-8 py-8 space-y-4" data-testid="system-editor">
       <button className="text-sm text-muted-foreground hover:text-foreground" onClick={onBack}>
-        {LABELS.SYSTEM_BACK}
+        {t('worldModel.system.back')}
       </button>
       <div className="rounded-2xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-2xl p-4 space-y-4">
         <div className="flex items-center gap-3">
@@ -60,7 +61,7 @@ export function SystemEditor({ novelId, system, onBack }: {
             value={system.name}
             onSave={v => save({ name: v })}
             className="text-lg font-semibold"
-            placeholder={LABELS.PH_SYSTEM_NAME}
+            placeholder={t('worldModel.system.namePlaceholder')}
           />
           <VisibilityDot
             visibility={system.visibility}
@@ -76,7 +77,7 @@ export function SystemEditor({ novelId, system, onBack }: {
               }
             }}
             onMouseLeave={() => setConfirmDelete(false)}
-          >{confirmDelete ? LABELS.SYSTEM_DELETE_CONFIRM : LABELS.SYSTEM_DELETE}</button>
+          >{confirmDelete ? t('worldModel.system.deleteConfirm') : t('worldModel.system.delete')}</button>
         </div>
         {editorContent}
         <ConstraintsPanel

@@ -5,8 +5,8 @@ import {
   type ReactNode,
 } from 'react'
 import { useLocation } from 'react-router-dom'
-import { getDefaultCopilotInteractionLocale } from '@/types/copilot'
 import { NovelCopilotProvider } from '@/components/novel-copilot/NovelCopilotProvider'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import {
   parseNovelShellRouteState,
 } from './NovelShellRouteState'
@@ -18,7 +18,7 @@ import {
 
 export function NovelShellProvider({ children }: { children: ReactNode }) {
   const location = useLocation()
-  const interactionLocale = getDefaultCopilotInteractionLocale()
+  const { locale } = useUiLocale()
   // Route-parse + shell chrome live here; page modules keep their own server data and edit buffers.
   const routeState = useMemo(
     () => parseNovelShellRouteState(location.pathname, location.search),
@@ -41,9 +41,9 @@ export function NovelShellProvider({ children }: { children: ReactNode }) {
   return (
     <NovelShellContext.Provider value={value}>
       <NovelCopilotProvider
-        key={`${routeState.novelId ?? 'none'}:${interactionLocale}`}
+        key={`${routeState.novelId ?? 'none'}:${locale}`}
         novelId={routeState.novelId}
-        interactionLocale={interactionLocale}
+        interactionLocale={locale}
       >
         {children}
       </NovelCopilotProvider>

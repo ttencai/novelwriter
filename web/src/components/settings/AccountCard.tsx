@@ -1,6 +1,7 @@
 import { LogOut, MessageSquarePlus } from "lucide-react"
 import { useState } from "react"
 import { useAuth } from "@/contexts/AuthContext"
+import { useUiLocale } from "@/contexts/UiLocaleContext"
 import { api } from "@/services/api"
 import { NwButton } from "@/components/ui/nw-button"
 import { FeedbackForm, type FeedbackAnswers } from "@/components/feedback/FeedbackForm"
@@ -9,6 +10,7 @@ const IS_HOSTED = (import.meta.env.VITE_DEPLOY_MODE || "selfhost") === "hosted"
 
 export function AccountCard() {
     const { user, logout, refreshQuota } = useAuth()
+    const { t } = useUiLocale()
     const [showForm, setShowForm] = useState(false)
     const [submitting, setSubmitting] = useState(false)
 
@@ -49,7 +51,7 @@ export function AccountCard() {
 
                 {/* Info rows */}
                 <div className="flex items-center justify-between">
-                    <span className="text-[13px] text-muted-foreground">昵称</span>
+                    <span className="text-[13px] text-muted-foreground">{t('settings.account.nickname')}</span>
                     <span className="text-[13px]">{displayName}</span>
                 </div>
 
@@ -57,7 +59,7 @@ export function AccountCard() {
                 {IS_HOSTED && (
                     <>
                         <div className="flex items-center justify-between">
-                            <span className="text-[13px] text-muted-foreground">剩余生成次数</span>
+                            <span className="text-[13px] text-muted-foreground">{t('settings.account.remainingQuota')}</span>
                             <span className={`text-[13px] font-mono ${user.generation_quota <= 0 ? 'text-[hsl(var(--color-danger))]' : ''}`}>
                                 {user.generation_quota}
                             </span>
@@ -68,7 +70,7 @@ export function AccountCard() {
                                 <div className="h-px bg-[var(--nw-glass-bg-hover)]" />
                                 <div className="flex flex-col gap-2">
                                     <span className="text-[13px] text-muted-foreground">
-                                        提交反馈可获得额外生成额度
+                                        {t('settings.account.feedbackReward')}
                                     </span>
                                     <NwButton
                                         variant="glass"
@@ -76,7 +78,7 @@ export function AccountCard() {
                                         className="h-9 rounded-lg text-sm"
                                     >
                                         <MessageSquarePlus className="h-4 w-4 mr-2" />
-                                        提交反馈
+                                        {t('settings.account.submitFeedback')}
                                     </NwButton>
                                 </div>
                             </>
@@ -94,7 +96,7 @@ export function AccountCard() {
                     className="flex items-center justify-center gap-2 h-10 rounded-[10px] border border-[hsl(var(--color-danger)/0.25)] text-[hsl(var(--color-danger))] hover:bg-[hsl(var(--color-danger)/0.08)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--color-danger))] focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                     <LogOut className="h-4 w-4" />
-                    <span className="text-sm font-medium">退出登录</span>
+                    <span className="text-sm font-medium">{t('settings.account.logout')}</span>
                 </button>
             </div>
 

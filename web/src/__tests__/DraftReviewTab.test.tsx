@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
+import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
 import { DraftReviewTab } from '@/components/world-model/shared/DraftReviewTab'
 
 const mockUseWorldEntities = vi.fn()
@@ -33,6 +34,8 @@ vi.mock('@/hooks/world/useSystems', () => ({
 describe('DraftReviewTab', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
+    document.documentElement.lang = 'zh-CN'
 
     mockUseWorldEntities.mockImplementation((_novelId: number, params?: { status?: string }) => {
       if (params?.status === 'draft') {
@@ -68,18 +71,42 @@ describe('DraftReviewTab', () => {
 
   it('hides batch confirm/reject controls when batch actions are disabled for Studio', () => {
     render(
-      <DraftReviewTab
-        novelId={7}
-        kind="entities"
-        onOpenEntity={vi.fn()}
-        onOpenRelationships={vi.fn()}
-        showKindSelector={false}
-        showBatchActions={false}
-      />,
+      <UiLocaleProvider>
+        <DraftReviewTab
+          novelId={7}
+          kind="entities"
+          onOpenEntity={vi.fn()}
+          onOpenRelationships={vi.fn()}
+          showKindSelector={false}
+          showBatchActions={false}
+        />
+      </UiLocaleProvider>,
     )
 
     expect(screen.queryByRole('button', { name: /确认 全部/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /拒绝 全部/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '查看' })).toBeInTheDocument()
+  })
+
+  it('renders English draft review actions when the UI locale is en', () => {
+    localStorage.setItem('novwr_ui_locale', 'en')
+    document.documentElement.lang = 'en'
+
+    render(
+      <UiLocaleProvider>
+        <DraftReviewTab
+          novelId={7}
+          kind="entities"
+          onOpenEntity={vi.fn()}
+          onOpenRelationships={vi.fn()}
+          showKindSelector={false}
+          showBatchActions={false}
+        />
+      </UiLocaleProvider>,
+    )
+
+    expect(screen.getByText('Entities (1)')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument()
   })
 })

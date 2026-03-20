@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { useWorldEntities } from '@/hooks/world/useEntities'
 import { useWorldRelationships } from '@/hooks/world/useRelationships'
 import { useWorldSystems } from '@/hooks/world/useSystems'
@@ -14,6 +15,7 @@ export function DraftReviewSummaryCard({
   onOpen: (kind?: DraftReviewKind) => void
   className?: string
 }) {
+  const { t } = useUiLocale()
   const { data: draftEntities = [] } = useWorldEntities(novelId, { status: 'draft' })
   const { data: draftRelationships = [] } = useWorldRelationships(novelId, { status: 'draft' })
   const { data: draftSystems = [] } = useWorldSystems(novelId, { status: 'draft' })
@@ -27,20 +29,20 @@ export function DraftReviewSummaryCard({
       className={cn('flex items-center gap-1.5 px-3 py-2', className)}
       data-testid="draft-review-summary-card"
     >
-      <span className="text-xs font-medium text-foreground">草稿审核</span>
+      <span className="text-xs font-medium text-foreground">{t('worldModel.common.draftReview')}</span>
       <span className="text-xs tabular-nums text-[hsl(var(--color-status-draft))]">{total}</span>
       <span className="text-xs text-muted-foreground/50">·</span>
-      <CountSpan label="实体" count={draftEntities.length} onClick={() => onOpen('entities')} />
+      <CountSpan label={t('worldModel.common.entities')} count={draftEntities.length} onClick={() => onOpen('entities')} />
       <span className="text-xs text-muted-foreground/50">·</span>
-      <CountSpan label="关系" count={draftRelationships.length} onClick={() => onOpen('relationships')} />
+      <CountSpan label={t('worldModel.common.relationships')} count={draftRelationships.length} onClick={() => onOpen('relationships')} />
       <span className="text-xs text-muted-foreground/50">·</span>
-      <CountSpan label="体系" count={draftSystems.length} onClick={() => onOpen('systems')} />
+      <CountSpan label={t('worldModel.common.systems')} count={draftSystems.length} onClick={() => onOpen('systems')} />
       <button
         type="button"
         className="ml-auto text-xs text-muted-foreground hover:text-foreground transition-colors"
         onClick={() => onOpen()}
       >
-        查看全部 →
+        {t('worldModel.draftReview.viewAll')}
       </button>
     </div>
   )

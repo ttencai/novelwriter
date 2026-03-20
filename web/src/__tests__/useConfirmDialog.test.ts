@@ -1,15 +1,26 @@
-import { describe, it, expect } from 'vitest'
+import { beforeEach, describe, it, expect } from 'vitest'
+import { createElement, type ReactNode } from 'react'
 import { renderHook, act } from '@testing-library/react'
+import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 
 describe('useConfirmDialog', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    document.documentElement.lang = 'zh-CN'
+  })
+
+  function wrapper({ children }: { children: ReactNode }) {
+    return createElement(UiLocaleProvider, null, children)
+  }
+
   it('starts closed', () => {
-    const { result } = renderHook(() => useConfirmDialog())
+    const { result } = renderHook(() => useConfirmDialog(), { wrapper })
     expect(result.current.dialogProps.open).toBe(false)
   })
 
   it('confirm() opens dialog and resolves true on confirm', async () => {
-    const { result } = renderHook(() => useConfirmDialog())
+    const { result } = renderHook(() => useConfirmDialog(), { wrapper })
 
     let resolved: boolean | undefined
     act(() => {
@@ -25,7 +36,7 @@ describe('useConfirmDialog', () => {
   })
 
   it('confirm() resolves false on close', async () => {
-    const { result } = renderHook(() => useConfirmDialog())
+    const { result } = renderHook(() => useConfirmDialog(), { wrapper })
 
     let resolved: boolean | undefined
     act(() => {
@@ -37,7 +48,7 @@ describe('useConfirmDialog', () => {
   })
 
   it('alert() opens dialog without cancel button', async () => {
-    const { result } = renderHook(() => useConfirmDialog())
+    const { result } = renderHook(() => useConfirmDialog(), { wrapper })
 
     let alertDone = false
     act(() => {
@@ -53,7 +64,7 @@ describe('useConfirmDialog', () => {
   })
 
   it('queues multiple dialogs', async () => {
-    const { result } = renderHook(() => useConfirmDialog())
+    const { result } = renderHook(() => useConfirmDialog(), { wrapper })
 
     const results: boolean[] = []
     act(() => {
@@ -68,5 +79,18 @@ describe('useConfirmDialog', () => {
 
     act(() => result.current.dialogProps.onClose())
     await vi.waitFor(() => expect(results).toEqual([true, false]))
+  })
+
+  it('uses English default button labels when the UI locale is en', async () => {
+    localStorage.setItem('novwr_ui_locale', 'en')
+    document.documentElement.lang = 'en'
+
+    const { result } = renderHook(() => useConfirmDialog(), { wrapper })
+
+    act(() => {
+      result.current.alert({ title: 'Heads up' })
+    })
+
+    expect(result.current.dialogProps.confirmText).toBe('Got it')
   })
 })

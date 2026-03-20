@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { Upload } from 'lucide-react'
 import { useImportWorldpack } from '@/hooks/world/useWorldpack'
 import { useToast } from '@/components/world-model/shared/useToast'
-import { LABELS } from '@/constants/labels'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { Button } from '@/components/ui/button'
 import { renderWarningMessage } from '@/lib/warningMessages'
 import type { WorldpackImportCounts, WorldpackImportResponse, WorldpackImportWarning, WorldpackV1 } from '@/types/api'
@@ -50,13 +50,14 @@ function summarizeBucket(
   return { total, detail }
 }
 
-function formatWarning(w: WorldpackImportWarning): string {
-  const rendered = renderWarningMessage(w)
+function formatWarning(w: WorldpackImportWarning, locale: 'zh' | 'en'): string {
+  const rendered = renderWarningMessage(w, locale)
   const base = w.code ? `[${w.code}] ${rendered}` : rendered
   return w.path ? `${base} (${w.path})` : base
 }
 
 export function WorldpackPanel({ novelId, variant = 'page' }: { novelId: number; variant?: WorldpackPanelVariant }) {
+  const { locale, t } = useUiLocale()
   const { toast } = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -78,22 +79,22 @@ export function WorldpackPanel({ novelId, variant = 'page' }: { novelId: number;
       const text = await file.text()
       const parsed = JSON.parse(text) as unknown
       if (!isWorldpackV1(parsed)) {
-        setParseError('文件格式不支持，请使用正确的世界观文件')
+        setParseError(t('worldModel.worldpack.fileUnsupported'))
         return
       }
       setSelectedFile({ name: file.name, payload: parsed })
       importMutation.mutate(parsed, {
         onSuccess: (data) => {
           setResult(data)
-          toast(LABELS.WORLDPACK_IMPORT_COMPLETED)
+          toast(t('worldModel.worldpack.completed'))
         },
         onError: () => {
-          toast(LABELS.WORLDPACK_IMPORT_FAILED)
+          toast(t('worldModel.worldpack.failed'))
         },
       })
     } catch (err) {
       console.error(err)
-      setParseError('文件内容无法识别，请检查文件格式')
+      setParseError(t('worldModel.worldpack.fileUnreadable'))
     } finally {
       // Reset input so same file can be selected again
       e.target.value = ''
@@ -144,28 +145,28 @@ export function WorldpackPanel({ novelId, variant = 'page' }: { novelId: number;
       <div className={dense ? 'mt-3 space-y-3' : 'mt-4 space-y-4'}>
         <div className={dense ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-1 sm:grid-cols-3 gap-3'}>
           <div className={cardClass}>
-            <div className="text-[11px] text-muted-foreground">新增</div>
+            <div className="text-[11px] text-muted-foreground">{t('worldModel.common.created')}</div>
             <div className={numberClass}>{counts.created.total}</div>
           </div>
           <div className={cardClass}>
-            <div className="text-[11px] text-muted-foreground">更新</div>
+            <div className="text-[11px] text-muted-foreground">{t('worldModel.common.updated')}</div>
             <div className={numberClass}>{counts.updated.total}</div>
           </div>
           <div className={cardClass}>
-            <div className="text-[11px] text-muted-foreground">删除</div>
+            <div className="text-[11px] text-muted-foreground">{t('worldModel.common.deleted')}</div>
             <div className={numberClass}>{counts.deleted.total}</div>
           </div>
         </div>
 
         {dense ? null : (
           <div className="space-y-1">
-            <div className="text-xs font-medium text-foreground">注意事项</div>
+            <div className="text-xs font-medium text-foreground">{t('worldModel.common.notes')}</div>
             {counts.warnings.length === 0 ? (
-              <div className="text-xs text-muted-foreground">无</div>
+              <div className="text-xs text-muted-foreground">{t('worldModel.common.none')}</div>
             ) : (
               <ul className="text-xs text-muted-foreground list-disc pl-5 space-y-0.5">
                 {counts.warnings.map((w, idx) => (
-                  <li key={`${idx}-${w.code}-${w.path ?? ''}`}>{formatWarning(w)}</li>
+                  <li key={`${idx}-${w.code}-${w.path ?? ''}`}>{formatWarning(w, locale)}</li>
                 ))}
               </ul>
             )}
@@ -179,20 +180,20 @@ export function WorldpackPanel({ novelId, variant = 'page' }: { novelId: number;
     <div className={variant === 'page' ? 'rounded-xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-2xl p-4 sm:p-6' : 'rounded-xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-2xl p-3'}>
       <div className={variant === 'page' ? 'flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between' : 'flex items-start justify-between gap-3'}>
         <div className="space-y-1">
-          <div className="text-sm font-semibold tracking-tight">导入世界观</div>
-          <div className="text-xs text-muted-foreground">上传世界观文件</div>
+          <div className="text-sm font-semibold tracking-tight">{t('worldModel.worldpack.title')}</div>
+          <div className="text-xs text-muted-foreground">{t('worldModel.worldpack.subtitle')}</div>
         </div>
-        {renderControls(variant === 'page' ? '选择文件并导入' : '导入')}
+        {renderControls(variant === 'page' ? t('worldModel.worldpack.selectAndImport') : t('worldModel.worldpack.import'))}
       </div>
 
       {selectedFile && (
         <div className={variant === 'page' ? 'mt-4 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-muted-foreground' : 'mt-3 text-[11px] text-muted-foreground'}>
           <span>
-            文件：<span className="text-foreground">{selectedFile.name}</span>
+            {t('worldModel.common.file')}：<span className="text-foreground">{selectedFile.name}</span>
           </span>
           {variant === 'page' && selectedFile.payload.pack_name ? (
             <span>
-              包：<span className="text-foreground">{selectedFile.payload.pack_name}</span>
+              {t('worldModel.common.pack')}：<span className="text-foreground">{selectedFile.payload.pack_name}</span>
             </span>
           ) : null}
         </div>
@@ -207,7 +208,7 @@ export function WorldpackPanel({ novelId, variant = 'page' }: { novelId: number;
       {importMutation.isPending && (
         <div className={variant === 'page' ? 'mt-4 flex items-center gap-2 text-xs text-muted-foreground' : 'mt-3 flex items-center gap-2 text-[11px] text-muted-foreground'}>
           <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-          正在导入...
+          {t('worldModel.worldpack.importing')}
         </div>
       )}
 

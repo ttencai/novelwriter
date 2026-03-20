@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { SystemNavigator } from '@/components/atlas/systems/SystemNavigator'
 import { SystemEditor } from '@/components/world-model/systems/SystemEditor'
 import { useWorldSystem } from '@/hooks/world/useSystems'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import type { WorldSystem } from '@/types/api'
 import type { DraftReviewKind } from '@/components/atlas/review/DraftReviewSummaryCard'
 
@@ -16,6 +17,7 @@ export function SystemsWorkspace({
   selectedId?: number | null
   onSelectSystem?: (systemId: number) => void
 }) {
+  const { t } = useUiLocale()
   const [selectedIdInternal, setSelectedIdInternal] = useState<number | null>(null)
   const selectedId = selectedIdProp ?? selectedIdInternal
   const { data: system } = useWorldSystem(novelId, selectedId)
@@ -43,7 +45,7 @@ export function SystemsWorkspace({
           <SystemEditor novelId={novelId} system={system} onBack={() => setSelectedIdInternal(null)} />
         ) : (
           <div className="h-full flex items-center justify-center text-muted-foreground">
-            选择一个体系开始编辑
+            {t('worldModel.atlas.startEditingSystem')}
           </div>
         )}
       </div>

@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createElement } from 'react'
+import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
 import { BootstrapPanel } from '@/components/world-model/shared/BootstrapPanel'
 import { ToastProvider } from '@/components/world-model/shared/Toast'
 import type { BootstrapJobResponse, WindowIndexState } from '@/types/api'
@@ -48,7 +49,11 @@ function renderPanel() {
     createElement(
       QueryClientProvider,
       { client: qc },
-      createElement(ToastProvider, null, createElement(BootstrapPanel, { novelId: 1 }))
+      createElement(
+        UiLocaleProvider,
+        null,
+        createElement(ToastProvider, null, createElement(BootstrapPanel, { novelId: 1 })),
+      )
     )
   )
 }
@@ -60,6 +65,8 @@ describe('BootstrapPanel (sidebar variant)', () => {
     vi.restoreAllMocks()
     mockUseTriggerBootstrap.mockReturnValue({ mutate: mutateFn, isPending: false })
     mockUseNovelWindowIndex.mockReturnValue({ data: freshIndexState })
+    localStorage.clear()
+    document.documentElement.lang = 'zh-CN'
   })
 
   it('renders skeleton while loading', () => {
@@ -125,6 +132,18 @@ describe('BootstrapPanel (sidebar variant)', () => {
     mockUseBootstrapStatus.mockReturnValue({ data: runningJob, isLoading: false })
     renderPanel()
     expect(screen.getByText('提取候选词')).toBeTruthy()
+  })
+
+  it('renders bootstrap copy in English when the UI locale is en', () => {
+    localStorage.setItem('novwr_ui_locale', 'en')
+    document.documentElement.lang = 'en'
+    mockUseBootstrapStatus.mockReturnValue({ data: baseJob, isLoading: false })
+
+    renderPanel()
+
+    expect(screen.getByText('Extract from chapters')).toBeTruthy()
+    expect(screen.getByText('10 entities · 5 relationships')).toBeTruthy()
+    expect(screen.getByText('Ready to search clues across the whole book')).toBeTruthy()
   })
 
   it('calls trigger with initial payload on idle row click', async () => {

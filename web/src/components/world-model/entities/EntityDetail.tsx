@@ -8,11 +8,11 @@ import { AttributeRow } from '@/components/world-model/entities/AttributeRow'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { GlassSurface } from '@/components/ui/glass-surface'
 import { useWorldEntity, useUpdateEntity, useDeleteEntity, useCreateAttribute, useReorderAttributes } from '@/hooks/world/useEntities'
-import { LABELS } from '@/constants/labels'
 import type { WorldEntityAttribute } from '@/types/api'
 import type { CopilotContextStage } from '@/types/copilot'
 import { useNovelCopilot } from '@/components/novel-copilot/NovelCopilotContext'
 import { buildCurrentEntityCopilotLaunchArgs } from '@/components/novel-copilot/novelCopilotLauncher'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { Sparkles } from 'lucide-react'
 
 function SortableAttributeRow({ novelId, entityId, attribute }: {
@@ -38,6 +38,7 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
   copilotSurface?: 'studio' | 'atlas'
   copilotStage?: CopilotContextStage
 }) {
+  const { t } = useUiLocale()
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showTypeDropdown, setShowTypeDropdown] = useState(false)
   const [customType, setCustomType] = useState('')
@@ -53,10 +54,10 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
 
   if (!entityId || !entity) {
     return (
-      <div className="flex-1 flex items-center justify-center text-muted-foreground">
-        {LABELS.ENTITY_EMPTY}
-      </div>
-    )
+        <div className="flex-1 flex items-center justify-center text-muted-foreground">
+        {t('worldModel.entity.empty')}
+        </div>
+      )
   }
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -147,7 +148,7 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
                       <div className="px-3 py-1">
                         <input
                           className="w-full text-sm rounded-lg border border-[var(--nw-glass-border)] bg-transparent px-2 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                          placeholder="Custom..."
+                          placeholder={t('worldModel.entity.customTypePlaceholder')}
                           value={customType}
                           onChange={e => setCustomType(e.target.value)}
                           onKeyDown={e => { if (e.key === 'Enter' && customType.trim()) handleTypeSelect(customType.trim()) }}
@@ -190,7 +191,7 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
                       onClick={() => { setShowMenu(false); setShowDeleteConfirm(true) }}
                       data-testid="entity-delete-menu"
                     >
-                      {LABELS.ENTITY_DELETE}
+                      {t('worldModel.entity.delete')}
                     </button>
                   </GlassSurface>
                 </>
@@ -202,14 +203,14 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
         {/* Description */}
         <div className="mt-4">
           <div className="rounded-xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-2xl p-4">
-            <div className="text-xs font-semibold tracking-wider text-muted-foreground mb-2">描述</div>
+            <div className="text-xs font-semibold tracking-wider text-muted-foreground mb-2">{t('worldModel.entity.description')}</div>
             <InlineEdit
               value={entity.description}
               onSave={v => updateEntity.mutate({ entityId, data: { description: v } })}
               multiline
               variant="transparent"
               className="text-sm text-foreground"
-              placeholder={LABELS.PH_DESCRIPTION}
+              placeholder={t('worldModel.common.description')}
             />
           </div>
         </div>
@@ -217,10 +218,10 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
         {/* Aliases */}
         <div className="mt-4">
           <div className="rounded-xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-2xl p-4">
-            <div className="text-xs font-semibold tracking-wider text-muted-foreground mb-2">别名</div>
+            <div className="text-xs font-semibold tracking-wider text-muted-foreground mb-2">{t('worldModel.entity.aliases')}</div>
             <div className="flex flex-wrap items-center gap-2">
               {aliases.length === 0 ? (
-                <span className="text-sm text-muted-foreground">（暂无别名）</span>
+                <span className="text-sm text-muted-foreground">{t('worldModel.entity.noAliases')}</span>
               ) : aliases.map((alias) => (
                 <span
                   key={alias}
@@ -232,7 +233,7 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
                     className="ml-0.5 text-muted-foreground/70 opacity-0 group-hover:opacity-100 transition-opacity hover:text-[hsl(var(--color-danger))]"
                     onClick={() => handleRemoveAlias(alias)}
                     aria-label={`Remove alias ${alias}`}
-                    title="移除"
+                    title={t('worldModel.common.remove')}
                   >
                     ×
                   </button>
@@ -243,7 +244,7 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
                 <input
                   className="h-7 w-40 rounded-full border border-[var(--nw-glass-border)] bg-transparent px-3 text-xs text-foreground placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                   value={newAlias}
-                  placeholder="添加别名..."
+                  placeholder={t('worldModel.entity.addAliasPlaceholder')}
                   onChange={(e) => setNewAlias(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleAddAlias() }}
                 />
@@ -253,7 +254,7 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
                   onClick={handleAddAlias}
                   disabled={!newAlias.trim()}
                 >
-                  添加
+                  {t('worldModel.entity.addAlias')}
                 </button>
               </div>
             </div>
@@ -264,7 +265,7 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
         <div className="mt-8">
           <div className="flex items-end justify-between gap-4 mb-3">
             <h3 className="text-sm font-medium text-muted-foreground">
-              {LABELS.ENTITY_ATTRIBUTES} ({entity.attributes.length})
+              {t('worldModel.entity.attributes')} ({entity.attributes.length})
             </h3>
             <button
               type="button"
@@ -272,17 +273,17 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
               data-testid="add-attribute"
               onClick={() => createAttr.mutate({ key: '', surface: '' })}
             >
-              {LABELS.ENTITY_ADD_ATTRIBUTE}
+              {t('worldModel.entity.addAttribute')}
             </button>
           </div>
 
           <div className="rounded-xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-2xl overflow-hidden">
             <div className="grid grid-cols-[16px_120px_1fr_1fr_44px_24px] items-center px-4 py-2 text-[11px] font-semibold text-muted-foreground border-b border-[var(--nw-glass-border)]">
               <div />
-              <div>属性名</div>
-              <div>表层</div>
-              <div>真相</div>
-              <div className="text-center">可见</div>
+              <div>{t('worldModel.entity.column.name')}</div>
+              <div>{t('worldModel.entity.column.surface')}</div>
+              <div>{t('worldModel.entity.column.truth')}</div>
+              <div className="text-center">{t('worldModel.entity.column.visibility')}</div>
               <div />
             </div>
             <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -303,8 +304,8 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
 
       <ConfirmDialog
         open={allowDelete && showDeleteConfirm}
-        title={LABELS.ENTITY_DELETE}
-        description={LABELS.ENTITY_DELETE_CONFIRM}
+        title={t('worldModel.entity.delete')}
+        description={t('worldModel.entity.deleteConfirm')}
         tone="destructive"
         onConfirm={handleDelete}
         onClose={() => setShowDeleteConfirm(false)}

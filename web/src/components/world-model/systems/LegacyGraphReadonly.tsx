@@ -1,4 +1,6 @@
 import type { Visibility } from '@/types/api'
+import { readDocumentUiLocale } from '@/lib/uiLocale'
+import { translateUiMessage } from '@/lib/uiMessages'
 
 interface LegacyGraphNode {
   id?: string
@@ -15,12 +17,14 @@ interface LegacyGraphEdge {
 }
 
 function visibilityText(visibility?: Visibility): string {
-  if (visibility === 'hidden') return '隐藏'
-  if (visibility === 'reference') return '参考'
-  return '活跃'
+  const locale = readDocumentUiLocale() ?? 'zh'
+  if (visibility === 'hidden') return locale === 'en' ? 'Hidden' : '隐藏'
+  if (visibility === 'reference') return locale === 'en' ? 'Reference' : '参考'
+  return locale === 'en' ? 'Active' : '活跃'
 }
 
 export function LegacyGraphReadonly({ data }: { data: Record<string, unknown> }) {
+  const locale = readDocumentUiLocale() ?? 'zh'
   const rawNodes = Array.isArray(data.nodes) ? data.nodes : []
   const rawEdges = Array.isArray(data.edges) ? data.edges : []
 
@@ -43,38 +47,40 @@ export function LegacyGraphReadonly({ data }: { data: Record<string, unknown> })
   return (
     <div className="space-y-4" data-testid="legacy-graph-readonly">
       <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-        这是旧版关系图体系。当前版本仅保留读取兼容，不再支持新建或编辑图结构；如需继续维护，请迁移到关系或列表/层级体系。
+        {translateUiMessage(locale, 'worldModel.legacyGraph.notice')}
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
         <div className="rounded-2xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] p-4">
-          <div className="text-sm font-medium text-foreground">节点 ({nodes.length})</div>
+          <div className="text-sm font-medium text-foreground">{translateUiMessage(locale, 'worldModel.legacyGraph.nodes', { count: nodes.length })}</div>
           {nodes.length > 0 ? (
             <div className="mt-3 space-y-2">
               {nodes.map((node, index) => {
-                const label = typeof node.label === 'string' && node.label.trim() ? node.label.trim() : `未命名节点 ${index + 1}`
+                const label = typeof node.label === 'string' && node.label.trim()
+                  ? node.label.trim()
+                  : translateUiMessage(locale, 'worldModel.common.unnamedNode', { index: index + 1 })
                 return (
                   <div key={node.id ?? `${label}-${index}`} className="rounded-xl border border-[var(--nw-glass-border)] px-3 py-2 text-sm">
                     <div className="text-foreground">{label}</div>
                     <div className="mt-1 text-xs text-muted-foreground">
-                      可见性：{visibilityText(node.visibility)}
+                      {translateUiMessage(locale, 'worldModel.common.visibility')}：{visibilityText(node.visibility)}
                     </div>
                   </div>
                 )
               })}
             </div>
           ) : (
-            <div className="mt-3 text-sm text-muted-foreground">没有可展示的节点。</div>
+            <div className="mt-3 text-sm text-muted-foreground">{translateUiMessage(locale, 'worldModel.legacyGraph.emptyNodes')}</div>
           )}
         </div>
 
         <div className="rounded-2xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] p-4">
-          <div className="text-sm font-medium text-foreground">连线 ({edges.length})</div>
+          <div className="text-sm font-medium text-foreground">{translateUiMessage(locale, 'worldModel.legacyGraph.edges', { count: edges.length })}</div>
           {edges.length > 0 ? (
             <div className="mt-3 space-y-2">
               {edges.map((edge, index) => {
-                const from = typeof edge.from === 'string' ? nodeNames.get(edge.from) ?? edge.from : '未知节点'
-                const to = typeof edge.to === 'string' ? nodeNames.get(edge.to) ?? edge.to : '未知节点'
+                const from = typeof edge.from === 'string' ? nodeNames.get(edge.from) ?? edge.from : translateUiMessage(locale, 'worldModel.common.unknownNode')
+                const to = typeof edge.to === 'string' ? nodeNames.get(edge.to) ?? edge.to : translateUiMessage(locale, 'worldModel.common.unknownNode')
                 const label = typeof edge.label === 'string' ? edge.label.trim() : ''
                 return (
                   <div key={`${edge.from ?? 'from'}-${edge.to ?? 'to'}-${index}`} className="rounded-xl border border-[var(--nw-glass-border)] px-3 py-2 text-sm">
@@ -84,14 +90,14 @@ export function LegacyGraphReadonly({ data }: { data: Record<string, unknown> })
                       {to}
                     </div>
                     <div className="mt-1 text-xs text-muted-foreground">
-                      可见性：{visibilityText(edge.visibility)}
+                      {translateUiMessage(locale, 'worldModel.common.visibility')}：{visibilityText(edge.visibility)}
                     </div>
                   </div>
                 )
               })}
             </div>
           ) : (
-            <div className="mt-3 text-sm text-muted-foreground">没有可展示的连线。</div>
+            <div className="mt-3 text-sm text-muted-foreground">{translateUiMessage(locale, 'worldModel.legacyGraph.emptyEdges')}</div>
           )}
         </div>
       </div>

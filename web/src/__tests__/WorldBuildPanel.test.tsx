@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
+import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
 import { ToastProvider } from '@/components/world-model/shared/Toast'
 import { WorldBuildPanel } from '@/components/world-model/shared/WorldBuildPanel'
 import type { BootstrapJobResponse, WindowIndexState } from '@/types/api'
@@ -78,7 +79,11 @@ function renderSection() {
       createElement(
         QueryClientProvider,
         { client: qc },
-        createElement(ToastProvider, null, createElement(WorldBuildPanel, { novelId: 1 }))
+        createElement(
+          UiLocaleProvider,
+          null,
+          createElement(ToastProvider, null, createElement(WorldBuildPanel, { novelId: 1 })),
+        )
       )
     )
   )
@@ -128,7 +133,11 @@ describe('WorldBuildPanel', () => {
         createElement(
           QueryClientProvider,
           { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
-          createElement(ToastProvider, null, createElement(WorldBuildPanel, { novelId: 1 }))
+          createElement(
+            UiLocaleProvider,
+            null,
+            createElement(ToastProvider, null, createElement(WorldBuildPanel, { novelId: 1 })),
+          )
         )
       )
     )
@@ -144,7 +153,11 @@ describe('WorldBuildPanel', () => {
         createElement(
           QueryClientProvider,
           { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) },
-          createElement(ToastProvider, null, createElement(WorldBuildPanel, { novelId: 1 }))
+          createElement(
+            UiLocaleProvider,
+            null,
+            createElement(ToastProvider, null, createElement(WorldBuildPanel, { novelId: 1 })),
+          )
         )
       )
     )

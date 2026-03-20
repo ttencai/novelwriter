@@ -5,7 +5,7 @@ import { getLlmApiErrorMessage } from '@/lib/llmErrorMessages'
 import { ApiError } from '@/services/api'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { LABELS } from '@/constants/labels'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { useGenerateWorld } from '@/hooks/world/useWorldGeneration'
 import { useImportWorldpack } from '@/hooks/world/useWorldpack'
 import type { WorldpackV1 } from '@/types/api'
@@ -36,14 +36,17 @@ function isTextFieldValidationError(item: FastApiValidationErrorItem): boolean {
   return Array.isArray(loc) && loc.length > 0 && loc[loc.length - 1] === 'text'
 }
 
-function getWorldGenerate422Message(detail: unknown): string | null {
+function getWorldGenerate422Message(
+  detail: unknown,
+  t: ReturnType<typeof useUiLocale>['t'],
+): string | null {
   if (!Array.isArray(detail)) return null
   const items = detail.filter(isFastApiValidationErrorItem).filter(isTextFieldValidationError)
   for (const item of items) {
     const type = typeof item.type === 'string' ? item.type : ''
-    if (type === 'string_too_long') return `最多输入 ${MAX_LEN.toLocaleString()} 个字符`
-    if (type === 'string_too_short') return `请至少输入 ${MIN_LEN} 个非空白字符`
-    if (type === 'world_generate_text_too_short_non_whitespace') return `请至少输入 ${MIN_LEN} 个非空白字符`
+    if (type === 'string_too_long') return t('worldModel.generate.validation.maxChars', { count: MAX_LEN.toLocaleString() })
+    if (type === 'string_too_short') return t('worldModel.generate.validation.minChars', { count: MIN_LEN })
+    if (type === 'world_generate_text_too_short_non_whitespace') return t('worldModel.generate.validation.minChars', { count: MIN_LEN })
   }
   return null
 }
@@ -57,6 +60,7 @@ export function WorldGenerationDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  const { t } = useUiLocale()
   const navigate = useNavigate()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -102,23 +106,23 @@ export function WorldGenerationDialog({
               return
             }
             if (err.status === 422) {
-              setGenError(getWorldGenerate422Message(err.detail) ?? '输入不符合要求，请检查长度')
+              setGenError(getWorldGenerate422Message(err.detail, t) ?? t('worldModel.generate.inputInvalid'))
               return
             }
             if (err.code === 'world_generate_llm_unavailable') {
-              setGenError('AI 服务不可用，请检查模型配置或稍后重试')
+              setGenError(t('worldModel.generate.serviceUnavailable'))
               return
             }
             if (err.code === 'world_generate_llm_schema_invalid') {
-              setGenError('AI 输出解析失败，请重试')
+              setGenError(t('worldModel.generate.schemaInvalid'))
               return
             }
             if (err.code === 'world_generate_conflict') {
-              setGenError('生成冲突，请稍后重试')
+              setGenError(t('worldModel.generate.conflict'))
               return
             }
           }
-          setGenError('生成失败，请重试')
+          setGenError(t('worldModel.generate.failed'))
         },
       },
     )
@@ -131,7 +135,7 @@ export function WorldGenerationDialog({
     try {
       const parsed = JSON.parse(await file.text()) as unknown
       if (!isWorldpackV1(parsed)) {
-        setImportError('文件格式不支持，请使用正确的世界观文件')
+        setImportError(t('worldModel.generate.fileUnsupported'))
         return
       }
       importWorldpack.mutate(parsed, {
@@ -139,11 +143,11 @@ export function WorldGenerationDialog({
           onOpenChange(false)
           navigate(`/world/${novelId}`)
         },
-        onError: () => setImportError(LABELS.WORLDPACK_IMPORT_FAILED),
+        onError: () => setImportError(t('worldModel.generate.failed')),
       })
     } catch (err) {
       console.error(err)
-      setImportError('文件内容无法识别，请检查文件格式')
+      setImportError(t('worldModel.generate.fileUnreadable'))
     } finally {
       e.target.value = ''
     }
@@ -174,9 +178,9 @@ export function WorldGenerationDialog({
         >
           <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto" data-testid="world-gen-dialog">
             <div className="space-y-0.5">
-              <div className="text-sm font-semibold text-foreground">从设定生成</div>
+              <div className="text-sm font-semibold text-foreground">{t('worldModel.generate.title')}</div>
               <div className="text-xs text-muted-foreground">
-                粘贴世界观设定文本，生成草稿后进入「草稿审核」确认。
+                {t('worldModel.generate.description')}
               </div>
             </div>
 
@@ -185,7 +189,7 @@ export function WorldGenerationDialog({
                 ref={textareaRef}
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="在这里粘贴世界观设定（例如：世界规则、阵营、人物关系、力量体系…）"
+                placeholder={t('worldModel.generate.placeholder')}
                 className="min-h-[180px] bg-transparent border-[var(--nw-glass-border)] text-foreground placeholder:text-muted-foreground/70 focus-visible:ring-accent focus-visible:ring-offset-0"
                 data-testid="world-gen-text"
               />
@@ -193,8 +197,8 @@ export function WorldGenerationDialog({
                 <span className={tooShort || tooLong ? 'text-[hsl(var(--color-warning))]' : undefined}>
                   {trimmed.length.toLocaleString()} / {MAX_LEN.toLocaleString()}
                 </span>
-                {tooShort ? <span>至少 {MIN_LEN} 个非空白字符</span> : null}
-                {tooLong ? <span>已超过上限</span> : null}
+                {tooShort ? <span>{t('worldModel.generate.minLength', { count: MIN_LEN })}</span> : null}
+                {tooLong ? <span>{t('worldModel.generate.tooLong')}</span> : null}
                 <span className="ml-auto" />
               </div>
             </div>
@@ -216,7 +220,7 @@ export function WorldGenerationDialog({
                 className="h-8 border-[var(--nw-glass-border)] bg-transparent hover:bg-[var(--nw-glass-bg-hover)]"
                 onClick={() => onOpenChange(false)}
               >
-                {LABELS.CANCEL}
+                {t('dialog.cancel')}
               </Button>
               <Button
                 type="button"
@@ -226,7 +230,7 @@ export function WorldGenerationDialog({
                 disabled={!canSubmit}
                 data-testid="world-gen-submit"
               >
-                {generate.isPending ? '生成中...' : '生成'}
+                {generate.isPending ? t('worldModel.generate.submitting') : t('worldModel.generate.submit')}
               </Button>
             </div>
 
@@ -245,10 +249,10 @@ export function WorldGenerationDialog({
                   onClick={() => fileInputRef.current?.click()}
                   data-testid="world-gen-import-link"
                 >
-                  已有世界观文件？直接导入
+                  {t('worldModel.generate.importLink')}
                 </button>
                 {importWorldpack.isPending ? (
-                  <span className="text-[11px] text-muted-foreground">导入中...</span>
+                  <span className="text-[11px] text-muted-foreground">{t('worldModel.generate.importing')}</span>
                 ) : null}
               </div>
               {importError ? (

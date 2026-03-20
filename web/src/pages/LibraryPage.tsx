@@ -10,11 +10,13 @@ import { WorkCard } from '@/components/library/WorkCard'
 import { PageShell } from '@/components/layout/PageShell'
 import { NwButton } from '@/components/ui/nw-button'
 import { GlassCard } from '@/components/GlassCard'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { api } from '@/services/api'
 import { novelKeys } from '@/hooks/novel/keys'
 import { clearWorldOnboardingDismissed } from '@/lib/worldOnboardingStorage'
 
 export function LibraryPage() {
+  const { t } = useUiLocale()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -34,7 +36,7 @@ export function LibraryPage() {
   })
 
   function handleDelete(id: number) {
-    if (!window.confirm('确定要删除这部作品吗？此操作不可撤销。')) return
+    if (!window.confirm(t('library.confirm.delete'))) return
     const novel = novels.find((n) => n.id === id)
     deleteNovel.mutate({ id, created_at: novel?.created_at })
   }
@@ -52,7 +54,7 @@ export function LibraryPage() {
       queryClient.invalidateQueries({ queryKey: novelKeys.all })
       navigate(`/novel/${result.novel_id}`)
     } catch (err) {
-      alert(err instanceof Error ? err.message : '上传失败')
+      alert(err instanceof Error ? err.message : t('library.error.uploadFailed'))
     }
     e.target.value = ''
   }
@@ -65,7 +67,7 @@ export function LibraryPage() {
       className="rounded-full px-6 py-2.5 text-sm font-semibold shadow-[0_0_24px_hsl(var(--accent)/0.35)]"
     >
       <Plus size={18} />
-      新建作品
+      {t('library.create')}
     </NwButton>
   )
 
@@ -84,10 +86,10 @@ export function LibraryPage() {
         <div className="flex items-center justify-between gap-6">
           <div className="flex flex-col gap-1">
             <h1 className="m-0 font-mono text-2xl font-bold text-foreground">
-              我的作品库
+              {t('library.title')}
             </h1>
             <p className="m-0 text-sm text-muted-foreground">
-              管理你的所有小说作品
+              {t('library.description')}
             </p>
           </div>
           {createButton}
@@ -108,7 +110,7 @@ export function LibraryPage() {
         {/* Error */}
         {error && (
           <p className="text-sm text-[hsl(var(--color-warning))]">
-            加载失败: {error instanceof Error ? error.message : '未知错误'}
+            {t('library.error.load')}: {error instanceof Error ? error.message : t('library.error.unknown')}
           </p>
         )}
 

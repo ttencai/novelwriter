@@ -1,5 +1,6 @@
 import { useRef, useState } from "react"
 import { ConfirmTone } from "@/components/ui/confirm-dialog"
+import { useUiLocale } from "@/contexts/UiLocaleContext"
 
 type DialogMode = "confirm" | "alert"
 
@@ -22,6 +23,7 @@ interface DialogOptions {
 }
 
 export function useConfirmDialog() {
+    const { t } = useUiLocale()
     const [state, setState] = useState<DialogState | null>(null)
     const queueRef = useRef<DialogState[]>([])
 
@@ -76,8 +78,8 @@ export function useConfirmDialog() {
         open: Boolean(state),
         title: state?.title ?? "",
         description: state?.description,
-        confirmText: state?.confirmText ?? (state?.mode === "alert" ? "知道了" : "确认"),
-        cancelText: state?.cancelText ?? "取消",
+        confirmText: state?.confirmText ?? (state?.mode === "alert" ? t('dialog.gotIt') : t('dialog.confirm')),
+        cancelText: state?.cancelText ?? t('dialog.cancel'),
         showCancel: state?.mode === "confirm",
         tone: state?.tone ?? "default",
         onConfirm: handleConfirm,

@@ -7,6 +7,7 @@ import { NovelShell } from '@/components/novel-shell/NovelShell'
 import { useNovelShell } from '@/components/novel-shell/NovelShellContext'
 import { useNovelCopilot } from '@/components/novel-copilot/NovelCopilotContext'
 import { NovelCopilotDrawer } from '@/components/novel-copilot/NovelCopilotDrawer'
+import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
 
 // Mock copilot API
 vi.mock('@/services/api', async (importOriginal) => {
@@ -135,14 +136,16 @@ describe('NovelShell', () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/world/7?tab=entities']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route path="/world/:novelId" element={<ShellProbe nextPath="/novel/7/chapter/3/results" />} />
-              <Route path="/novel/:novelId/chapter/:chapterNum/results" element={<ShellProbe />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
+        <UiLocaleProvider>
+          <MemoryRouter initialEntries={['/world/7?tab=entities']}>
+            <Routes>
+              <Route element={<NovelShell />}>
+                <Route path="/world/:novelId" element={<ShellProbe nextPath="/novel/7/chapter/3/results" />} />
+                <Route path="/novel/:novelId/chapter/:chapterNum/results" element={<ShellProbe />} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </UiLocaleProvider>
       </QueryClientProvider>,
     )
 
@@ -170,19 +173,21 @@ describe('NovelShell', () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/world/7?tab=entities']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route path="/world/:novelId" element={
-                <>
-                  <ShellProbe nextPath="/novel/7/chapter/3/results" />
-                  <NovelCopilotDrawer novelId={7} />
-                </>
-              } />
-              <Route path="/novel/:novelId/chapter/:chapterNum/results" element={<ShellProbe />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
+        <UiLocaleProvider>
+          <MemoryRouter initialEntries={['/world/7?tab=entities']}>
+            <Routes>
+              <Route element={<NovelShell />}>
+                <Route path="/world/:novelId" element={
+                  <>
+                    <ShellProbe nextPath="/novel/7/chapter/3/results" />
+                    <NovelCopilotDrawer novelId={7} />
+                  </>
+                } />
+                <Route path="/novel/:novelId/chapter/:chapterNum/results" element={<ShellProbe />} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </UiLocaleProvider>
       </QueryClientProvider>,
     )
 
@@ -213,21 +218,23 @@ describe('NovelShell', () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/novel/7']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route
-                path="/novel/:novelId"
-                element={
-                  <>
-                    <ShellProbe />
-                    <NovelCopilotDrawer novelId={7} />
-                  </>
-                }
-              />
-            </Route>
-          </Routes>
-        </MemoryRouter>
+        <UiLocaleProvider>
+          <MemoryRouter initialEntries={['/novel/7']}>
+            <Routes>
+              <Route element={<NovelShell />}>
+                <Route
+                  path="/novel/:novelId"
+                  element={
+                    <>
+                      <ShellProbe />
+                      <NovelCopilotDrawer novelId={7} />
+                    </>
+                  }
+                />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </UiLocaleProvider>
       </QueryClientProvider>,
     )
 
@@ -242,13 +249,15 @@ describe('NovelShell', () => {
 
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/world/7?tab=entities']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route path="/world/:novelId" element={<ShellProbe nextPath="/world/8?tab=entities" />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
+        <UiLocaleProvider>
+          <MemoryRouter initialEntries={['/world/7?tab=entities']}>
+            <Routes>
+              <Route element={<NovelShell />}>
+                <Route path="/world/:novelId" element={<ShellProbe nextPath="/world/8?tab=entities" />} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </UiLocaleProvider>
       </QueryClientProvider>,
     )
 

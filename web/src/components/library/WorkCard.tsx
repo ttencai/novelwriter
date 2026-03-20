@@ -1,8 +1,10 @@
 import { Link } from 'react-router-dom'
 import { Trash2 } from 'lucide-react'
 import { GlassCard } from '@/components/GlassCard'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { NwButton } from '@/components/ui/nw-button'
 import { formatRelativeTime } from '@/lib/formatRelativeTime'
+import { translateUiMessage } from '@/lib/uiMessages'
 import type { Novel } from '@/types/api'
 
 export function WorkCard({
@@ -12,6 +14,8 @@ export function WorkCard({
   novel: Novel
   onDelete: (id: number) => void
 }) {
+  const { locale } = useUiLocale()
+
   return (
     <Link to={`/novel/${novel.id}`} className="block no-underline">
       <GlassCard hoverable className="p-6 flex flex-col gap-4">
@@ -20,7 +24,10 @@ export function WorkCard({
             {novel.title}
           </h3>
           <div className="text-sm text-muted-foreground">
-            {novel.total_chapters} 章 · {formatRelativeTime(novel.updated_at)}更新
+            {translateUiMessage(locale, 'library.workCard.meta', {
+              chapterCount: novel.total_chapters,
+              relativeTime: formatRelativeTime(novel.updated_at, locale),
+            })}
           </div>
         </div>
 
@@ -41,7 +48,7 @@ export function WorkCard({
             className="rounded-lg px-3 py-1.5 text-sm"
           >
             <Trash2 size={14} />
-            删除
+            {translateUiMessage(locale, 'library.workCard.delete')}
           </NwButton>
         </div>
       </GlassCard>

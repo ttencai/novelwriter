@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useWorldEntities, useCreateEntity, useConfirmEntities, useRejectEntities } from '@/hooks/world/useEntities'
 import { LABELS } from '@/constants/labels'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import type { WorldEntity } from '@/types/api'
 
 export function EntityNavigator({ novelId, selectedEntityId, onSelectEntity, bottomSlot }: {
@@ -12,6 +13,7 @@ export function EntityNavigator({ novelId, selectedEntityId, onSelectEntity, bot
   onSelectEntity: (id: number) => void
   bottomSlot?: React.ReactNode
 }) {
+  const { locale, t } = useUiLocale()
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
   const { data: entities = [], isLoading } = useWorldEntities(novelId)
@@ -62,7 +64,7 @@ export function EntityNavigator({ novelId, selectedEntityId, onSelectEntity, bot
   }
 
   const handleCreate = () => {
-    createEntity.mutate({ name: '新实体', entity_type: 'Character' })
+    createEntity.mutate({ name: t('worldModel.entity.defaultName'), entity_type: 'Character' })
   }
 
   const handleConfirmAll = () => {
@@ -76,7 +78,7 @@ export function EntityNavigator({ novelId, selectedEntityId, onSelectEntity, bot
     >
       <div className="shrink-0 p-4 space-y-2">
         <Input
-          placeholder={LABELS.ENTITY_SEARCH_PLACEHOLDER}
+          placeholder={t('worldModel.common.searchEntities')}
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="h-9 text-sm bg-transparent border-[var(--nw-glass-border)] placeholder:text-muted-foreground/70 focus-visible:ring-accent focus-visible:ring-offset-0"
@@ -108,7 +110,7 @@ export function EntityNavigator({ novelId, selectedEntityId, onSelectEntity, bot
             onClick={handleConfirmAll}
             disabled={confirmEntities.isPending}
           >
-            {LABELS.CONFIRM_ALL_ENTITIES} ({draftIds.length})
+            {t('dialog.confirm')} {t('worldModel.common.all')} ({draftIds.length})
           </Button>
         )}
       </div>
@@ -123,6 +125,7 @@ export function EntityNavigator({ novelId, selectedEntityId, onSelectEntity, bot
           <EntityRow
             key={e.id}
             entity={e}
+            locale={locale}
             selected={e.id === selectedEntityId}
             onClick={() => onSelectEntity(e.id)}
             onConfirm={e.status === 'draft' ? () => handleConfirmOne(e.id) : undefined}
@@ -138,20 +141,22 @@ export function EntityNavigator({ novelId, selectedEntityId, onSelectEntity, bot
           onClick={handleCreate}
           data-testid="entity-create"
         >
-          {LABELS.ENTITY_NEW}
+          {t('worldModel.entity.new')}
         </button>
       </div>
     </div>
   )
 }
 
-function EntityRow({ entity, selected, onClick, onConfirm, onReject }: {
+function EntityRow({ entity, locale, selected, onClick, onConfirm, onReject }: {
   entity: WorldEntity
+  locale: 'zh' | 'en'
   selected: boolean
   onClick: () => void
   onConfirm?: () => void
   onReject?: () => void
 }) {
+  const { t } = useUiLocale()
   const isDraft = entity.status === 'draft'
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -184,7 +189,7 @@ function EntityRow({ entity, selected, onClick, onConfirm, onReject }: {
             <button
               onClick={(e) => { e.stopPropagation(); onConfirm() }}
               className="rounded p-0.5 text-muted-foreground hover:text-[hsl(var(--color-status-confirmed))] hover:bg-[hsl(var(--color-status-confirmed)/0.10)] transition-colors"
-              title="确认"
+              title={t('dialog.confirm')}
               data-testid={`entity-confirm-${entity.id}`}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -196,7 +201,7 @@ function EntityRow({ entity, selected, onClick, onConfirm, onReject }: {
             <button
               onClick={(e) => { e.stopPropagation(); onReject() }}
               className="rounded p-0.5 text-muted-foreground hover:text-[hsl(var(--color-danger))] hover:bg-[hsl(var(--color-danger)/0.10)] transition-colors"
-              title="拒绝"
+              title={t('worldModel.common.reject')}
               data-testid={`entity-reject-${entity.id}`}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -207,7 +212,7 @@ function EntityRow({ entity, selected, onClick, onConfirm, onReject }: {
           )}
         </span>
       ) : (
-        <span className="text-xs text-muted-foreground shrink-0">{entity.entity_type}</span>
+        <span className="text-xs text-muted-foreground shrink-0">{LABELS.ENTITY_TYPE_LABEL(entity.entity_type, locale)}</span>
       )}
     </div>
   )

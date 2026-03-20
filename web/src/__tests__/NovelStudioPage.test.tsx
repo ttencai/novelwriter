@@ -5,6 +5,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { NovelShell } from '@/components/novel-shell/NovelShell'
+import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
 import { NovelStudioPage } from '@/pages/NovelStudioPage'
 import { createTestQueryClient } from './helpers'
 
@@ -166,6 +167,26 @@ function LocationProbe() {
   )
 }
 
+function renderWithStudioShell(initialEntry: string, routes?: ReactNode) {
+  const queryClient = createTestQueryClient()
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <UiLocaleProvider>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          {routes ?? (
+            <Routes>
+              <Route element={<NovelShell />}>
+                <Route path="/novel/:novelId" element={<NovelStudioPage />} />
+              </Route>
+            </Routes>
+          )}
+        </MemoryRouter>
+      </UiLocaleProvider>
+    </QueryClientProvider>,
+  )
+}
+
 describe('NovelStudioPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -260,19 +281,7 @@ describe('NovelStudioPage', () => {
   })
 
   it('uses the requested chapter from the studio URL instead of falling back to chapter one', async () => {
-    const queryClient = createTestQueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/novel/7?chapter=3']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route path="/novel/:novelId" element={<NovelStudioPage />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWithStudioShell('/novel/7?chapter=3')
 
     await waitFor(() => {
       expect(screen.getByText('第三章内容')).toBeInTheDocument()
@@ -285,19 +294,7 @@ describe('NovelStudioPage', () => {
   })
 
   it('renders the in-shell entity inspection stage when the studio route requests an entity target', async () => {
-    const queryClient = createTestQueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/novel/7?stage=entity&entity=1&chapter=3']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route path="/novel/:novelId" element={<NovelStudioPage />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWithStudioShell('/novel/7?stage=entity&entity=1&chapter=3')
 
     await waitFor(() => {
       expect(screen.getByTestId('studio-entity-stage')).toBeInTheDocument()
@@ -305,19 +302,7 @@ describe('NovelStudioPage', () => {
   })
 
   it('renders the in-shell review stage when the studio route requests review mode', async () => {
-    const queryClient = createTestQueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/novel/7?stage=review&reviewKind=relationships&chapter=3']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route path="/novel/:novelId" element={<NovelStudioPage />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWithStudioShell('/novel/7?stage=review&reviewKind=relationships&chapter=3')
 
     await waitFor(() => {
       expect(screen.getByTestId('studio-review-stage')).toBeInTheDocument()
@@ -325,19 +310,7 @@ describe('NovelStudioPage', () => {
   })
 
   it('renders the in-shell relationship stage when the studio route requests relationship mode', async () => {
-    const queryClient = createTestQueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/novel/7?stage=relationship&entity=1&chapter=3']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route path="/novel/:novelId" element={<NovelStudioPage />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWithStudioShell('/novel/7?stage=relationship&entity=1&chapter=3')
 
     await waitFor(() => {
       expect(screen.getByTestId('studio-relationship-stage')).toBeInTheDocument()
@@ -345,19 +318,7 @@ describe('NovelStudioPage', () => {
   })
 
   it('renders the in-shell system stage when the studio route requests system mode', async () => {
-    const queryClient = createTestQueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/novel/7?stage=system&system=1&chapter=3']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route path="/novel/:novelId" element={<NovelStudioPage />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWithStudioShell('/novel/7?stage=system&system=1&chapter=3')
 
     await waitFor(() => {
       expect(screen.getByTestId('studio-system-stage')).toBeInTheDocument()
@@ -365,19 +326,7 @@ describe('NovelStudioPage', () => {
   })
 
   it('renders the in-shell results stage from the studio host route', async () => {
-    const queryClient = createTestQueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/novel/7?stage=results&chapter=3']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route path="/novel/:novelId" element={<NovelStudioPage />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWithStudioShell('/novel/7?stage=results&chapter=3')
 
     await waitFor(() => {
       expect(screen.getByTestId('continuation-results-stage')).toBeInTheDocument()
@@ -461,19 +410,7 @@ describe('NovelStudioPage', () => {
     }))
 
     const user = userEvent.setup()
-    const queryClient = createTestQueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/novel/7?chapter=84']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route path="/novel/:novelId" element={<NovelStudioPage />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWithStudioShell('/novel/7?chapter=84')
 
     await waitFor(() => {
       expect(screen.getByText('第84章内容')).toBeInTheDocument()
@@ -519,19 +456,7 @@ describe('NovelStudioPage', () => {
       prose_warnings: [],
     })
 
-    const queryClient = createTestQueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/novel/7?stage=entity&entity=1&chapter=3&resultsChapter=3&resultsContinuations=0:101&resultsTotalVariants=1&artifactPanel=injection_summary&summaryCategory=entities']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route path="/novel/:novelId" element={<NovelStudioPage />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    )
+    renderWithStudioShell('/novel/7?stage=entity&entity=1&chapter=3&resultsChapter=3&resultsContinuations=0:101&resultsTotalVariants=1&artifactPanel=injection_summary&summaryCategory=entities')
 
     await waitFor(() => {
       expect(screen.getByTestId('studio-entity-stage')).toBeInTheDocument()
@@ -555,27 +480,24 @@ describe('NovelStudioPage', () => {
     })
 
     const user = userEvent.setup()
-    const queryClient = createTestQueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/novel/7?chapter=3']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route
-                path="/novel/:novelId"
-                element={(
-                  <>
-                    <NovelStudioPage />
-                    <LocationProbe />
-                  </>
-                )}
-              />
-              <Route path="/world/:novelId" element={<LocationProbe />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
+    renderWithStudioShell(
+      '/novel/7?chapter=3',
+      (
+        <Routes>
+          <Route element={<NovelShell />}>
+            <Route
+              path="/novel/:novelId"
+              element={(
+                <>
+                  <NovelStudioPage />
+                  <LocationProbe />
+                </>
+              )}
+            />
+            <Route path="/world/:novelId" element={<LocationProbe />} />
+          </Route>
+        </Routes>
+      ),
     )
 
     await waitFor(() => {
@@ -611,27 +533,24 @@ describe('NovelStudioPage', () => {
     })
 
     const user = userEvent.setup()
-    const queryClient = createTestQueryClient()
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/novel/7?chapter=3']}>
-          <Routes>
-            <Route element={<NovelShell />}>
-              <Route
-                path="/novel/:novelId"
-                element={(
-                  <>
-                    <NovelStudioPage />
-                    <LocationProbe />
-                  </>
-                )}
-              />
-              <Route path="/world/:novelId" element={<LocationProbe />} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
+    renderWithStudioShell(
+      '/novel/7?chapter=3',
+      (
+        <Routes>
+          <Route element={<NovelShell />}>
+            <Route
+              path="/novel/:novelId"
+              element={(
+                <>
+                  <NovelStudioPage />
+                  <LocationProbe />
+                </>
+              )}
+            />
+            <Route path="/world/:novelId" element={<LocationProbe />} />
+          </Route>
+        </Routes>
+      ),
     )
 
     await waitFor(() => {

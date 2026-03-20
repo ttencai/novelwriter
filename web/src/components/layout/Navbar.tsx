@@ -1,6 +1,7 @@
 import { type ReactNode } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { useAuth } from "@/contexts/AuthContext"
+import { useUiLocale } from "@/contexts/UiLocaleContext"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
 import { NwButton } from "@/components/ui/nw-button"
@@ -22,6 +23,7 @@ export function Navbar({
     position = "fixed",
 }: NavbarProps) {
     const { isLoggedIn, user } = useAuth()
+    const { t } = useUiLocale()
     const { pathname } = useLocation()
     const isLanding = pathname === "/"
 
@@ -48,20 +50,20 @@ export function Navbar({
                         {!hideLinks ? (
                             <div className="hidden md:flex items-center gap-6 text-sm font-medium text-muted-foreground">
                                 {isLanding ? (
-                                    <a href="#features" className="hover:text-foreground transition-colors">功能</a>
+                                    <a href="#features" className="hover:text-foreground transition-colors">{t('navbar.features')}</a>
                                 ) : (
                                     <>
                                         <Link
                                             to="/library"
                                             className="hover:text-foreground transition-colors"
                                         >
-                                            作品库
+                                            {t('navbar.library')}
                                         </Link>
                                         <Link
                                             to="/settings"
                                             className="hover:text-foreground transition-colors"
                                         >
-                                            设置
+                                            {t('navbar.settings')}
                                         </Link>
                                     </>
                                 )}
@@ -83,7 +85,7 @@ export function Navbar({
                                 variant="glass"
                                 className="hidden md:inline-flex rounded-full bg-transparent px-5 py-1.5 text-sm font-medium backdrop-blur-none"
                             >
-                                <Link to="/login">登录</Link>
+                                <Link to="/login">{t('navbar.login')}</Link>
                             </NwButton>
                         )}
                     </div>

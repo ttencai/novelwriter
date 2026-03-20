@@ -5,7 +5,7 @@ import {
   NovelCopilotProvider,
 } from '@/components/novel-copilot/NovelCopilotProvider'
 import { ToastProvider } from '@/components/world-model/shared/Toast'
-import { getDefaultCopilotInteractionLocale } from '@/types/copilot'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 
 export function WorldBuildPanel({
   novelId,
@@ -17,6 +17,7 @@ export function WorldBuildPanel({
   variant?: 'default' | 'compact'
 }) {
   const copilot = useOptionalNovelCopilot()
+  const { locale } = useUiLocale()
 
   if (copilot) {
     return <NovelCopilotCard novelId={novelId} className={className} variant={variant} />
@@ -25,9 +26,9 @@ export function WorldBuildPanel({
   return (
     <ToastProvider>
       <NovelCopilotProvider
-        key={`${novelId}:${getDefaultCopilotInteractionLocale()}`}
+        key={`${novelId}:${locale}`}
         novelId={novelId}
-        interactionLocale={getDefaultCopilotInteractionLocale()}
+        interactionLocale={locale}
       >
         <NovelCopilotCard novelId={novelId} className={className} variant={variant} />
         <NovelCopilotDrawer novelId={novelId} />

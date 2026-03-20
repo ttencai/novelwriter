@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
 
 const {
   loginMock,
@@ -53,6 +54,8 @@ describe('Login', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.stubEnv('VITE_DEPLOY_MODE', 'hosted')
+    localStorage.clear()
+    document.documentElement.lang = 'zh-CN'
   })
 
   afterEach(() => {
@@ -70,21 +73,24 @@ describe('Login', () => {
   it('maps GitHub OAuth callback errors to user-facing copy', () => {
     expect(getOAuthErrorMessage('github_oauth_state_invalid')).toContain('登录状态已失效')
     expect(getOAuthErrorMessage('github_oauth_signup_blocked')).toContain('暂不接受新的 GitHub 注册')
+    expect(getOAuthErrorMessage('github_oauth_state_invalid', 'en')).toContain('login state expired')
     expect(getOAuthErrorMessage(null)).toBeNull()
   })
 
   it('renders the hosted GitHub login entry and preserves the safe redirect target', () => {
     render(
-      <MemoryRouter
-        initialEntries={[
-          {
-            pathname: '/login',
-            search: '?oauth_error=github_oauth_state_invalid&redirect_to=%2Fnovel%2F1',
-          },
-        ]}
-      >
-        <Login />
-      </MemoryRouter>,
+      <UiLocaleProvider>
+        <MemoryRouter
+          initialEntries={[
+            {
+              pathname: '/login',
+              search: '?oauth_error=github_oauth_state_invalid&redirect_to=%2Fnovel%2F1',
+            },
+          ]}
+        >
+          <Login />
+        </MemoryRouter>
+      </UiLocaleProvider>,
     )
 
     expect(screen.getByText('登录状态已失效，请重新点击 GitHub 登录。')).toBeVisible()
@@ -94,5 +100,29 @@ describe('Login', () => {
     )
     expect(getGitHubLoginUrlMock).toHaveBeenCalledWith('/novel/1')
     expect(screen.getByLabelText('邀请码')).toBeVisible()
+  })
+
+  it('renders English login copy when the UI locale is en', () => {
+    localStorage.setItem('novwr_ui_locale', 'en')
+    document.documentElement.lang = 'en'
+
+    render(
+      <UiLocaleProvider>
+        <MemoryRouter
+          initialEntries={[
+            {
+              pathname: '/login',
+              search: '?oauth_error=github_oauth_state_invalid',
+            },
+          ]}
+        >
+          <Login />
+        </MemoryRouter>
+      </UiLocaleProvider>,
+    )
+
+    expect(screen.getByText('Your login state expired. Please click GitHub sign-in again.')).toBeVisible()
+    expect(screen.getByLabelText('Invite code')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Get started' })).toBeVisible()
   })
 })

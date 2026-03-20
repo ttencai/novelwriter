@@ -154,15 +154,22 @@ http://localhost:8000
 
 ## 本地开发
 
+如果你不想用 Docker，推荐使用 **uv + repo-local `.venv`** 管理 Python 环境。
+
 ### 后端
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv venv .venv
+uv pip install --python .venv/bin/python -r requirements.txt
 cp .env.example .env
 # 编辑 .env
-uvicorn app.main:app --reload --port 8000
+scripts/uv_run.sh uvicorn app.main:app --reload --port 8000
+```
+
+如需运行后端测试：
+
+```bash
+scripts/uv_run.sh pytest tests/
 ```
 
 ### 前端

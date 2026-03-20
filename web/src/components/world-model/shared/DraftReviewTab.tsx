@@ -5,7 +5,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useWorldEntities, useConfirmEntities, useRejectEntities } from '@/hooks/world/useEntities'
 import { useWorldRelationships, useConfirmRelationships, useRejectRelationships } from '@/hooks/world/useRelationships'
 import { useWorldSystems, useConfirmSystems, useRejectSystems } from '@/hooks/world/useSystems'
-import { LABELS } from '@/constants/labels'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { getSystemDisplayTypeLabel } from '@/lib/worldSystemDisplay'
 import type { WorldEntity, WorldRelationship, WorldSystem } from '@/types/api'
 
@@ -36,6 +36,7 @@ export function DraftReviewTab({
   showBatchActions?: boolean
   highlightId?: number | null
 }) {
+  const { t } = useUiLocale()
   const [kindInternal, setKindInternal] = useState<ReviewKind>(initialKind)
   const kind = kindProp ?? kindInternal
   const setKind = onKindChange ?? setKindInternal
@@ -107,10 +108,12 @@ export function DraftReviewTab({
     setRejectAllConfirm({ kind, ids: idsForKind })
   }
 
-  const rejectAllKindLabel =
-    rejectAllConfirm?.kind === 'entities' ? '实体' :
-      rejectAllConfirm?.kind === 'relationships' ? '关系' :
-        rejectAllConfirm?.kind === 'systems' ? '体系' : ''
+  const kindLabels: Record<ReviewKind, string> = {
+    entities: t('worldModel.common.entities'),
+    relationships: t('worldModel.common.relationships'),
+    systems: t('worldModel.common.systems'),
+  }
+  const rejectAllKindLabel = rejectAllConfirm ? kindLabels[rejectAllConfirm.kind] : ''
 
   const handleConfirmRejectAll = () => {
     if (!rejectAllConfirm) return
@@ -132,22 +135,22 @@ export function DraftReviewTab({
           {showKindSelector ? (
             <div className="inline-flex rounded-full border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-xl p-1">
               <KindButton active={kind === 'entities'} onClick={() => setKind('entities')}>
-                实体 ({draftEntities.length})
+                {kindLabels.entities} ({draftEntities.length})
               </KindButton>
               <KindButton active={kind === 'relationships'} onClick={() => setKind('relationships')}>
-                关系 ({draftRelationships.length})
+                {kindLabels.relationships} ({draftRelationships.length})
               </KindButton>
               <KindButton active={kind === 'systems'} onClick={() => setKind('systems')}>
-                体系 ({draftSystems.length})
+                {kindLabels.systems} ({draftSystems.length})
               </KindButton>
             </div>
           ) : (
             <div className="text-sm font-semibold text-foreground">
               {kind === 'entities'
-                ? `实体草稿 (${draftEntities.length})`
+                ? `${kindLabels.entities} (${draftEntities.length})`
                 : kind === 'relationships'
-                  ? `关系草稿 (${draftRelationships.length})`
-                  : `体系草稿 (${draftSystems.length})`}
+                  ? `${kindLabels.relationships} (${draftRelationships.length})`
+                  : `${kindLabels.systems} (${draftSystems.length})`}
             </div>
           )}
 
@@ -160,7 +163,7 @@ export function DraftReviewTab({
                 onClick={handleConfirmAll}
                 disabled={idsForKind.length === 0 || confirmEntities.isPending || confirmRelationships.isPending || confirmSystems.isPending}
               >
-                {LABELS.CONFIRM} 全部 ({idsForKind.length})
+                {t('dialog.confirm')} {t('worldModel.common.all')} ({idsForKind.length})
               </Button>
               <Button
                 size="sm"
@@ -169,7 +172,7 @@ export function DraftReviewTab({
                 onClick={handleRejectAll}
                 disabled={idsForKind.length === 0 || rejectEntities.isPending || rejectRelationships.isPending || rejectSystems.isPending}
               >
-                拒绝 全部 ({idsForKind.length})
+                {t('worldModel.common.reject')} {t('worldModel.common.all')} ({idsForKind.length})
               </Button>
             </div>
           ) : null}
@@ -228,13 +231,16 @@ export function DraftReviewTab({
       <ConfirmDialog
         open={rejectAllConfirm !== null}
         tone="destructive"
-        title={`拒绝全部${rejectAllKindLabel}？`}
+        title={t('worldModel.draftReview.rejectAllTitle', { kind: rejectAllKindLabel })}
         description={
           rejectAllConfirm
-            ? `将删除 ${rejectAllConfirm.ids.length} 个草稿${rejectAllKindLabel}。\n此操作不可撤销。`
+            ? t('worldModel.draftReview.rejectAllDescription', {
+              count: rejectAllConfirm.ids.length,
+              kind: rejectAllKindLabel,
+            })
             : undefined
         }
-        confirmText="拒绝并删除"
+        confirmText={t('worldModel.draftReview.rejectAndDelete')}
         onConfirm={handleConfirmRejectAll}
         onClose={() => setRejectAllConfirm(null)}
       />
@@ -274,9 +280,10 @@ function CardShell({ id, highlighted, className, children }: { id?: string; high
 }
 
 function EmptyState() {
+  const { t } = useUiLocale()
   return (
     <div className="h-40 flex items-center justify-center text-sm text-muted-foreground">
-      暂无草稿
+      {t('worldModel.draftReview.noDrafts')}
     </div>
   )
 }
@@ -294,6 +301,7 @@ function EntityDraftCard({
   onReject: () => void
   onOpen: () => void
 }) {
+  const { t } = useUiLocale()
   return (
     <CardShell id={`draft-entities-${entity.id}`} highlighted={highlighted}>
       <div className="flex items-start gap-4">
@@ -309,10 +317,10 @@ function EntityDraftCard({
         </div>
         <div className="shrink-0 flex items-center gap-2">
           <Button size="sm" variant="outline" className="h-8" onClick={onOpen}>
-            查看
+            {t('worldModel.common.view')}
           </Button>
           <Button size="sm" variant="outline" className="h-8" onClick={onConfirm}>
-            {LABELS.CONFIRM}
+            {t('dialog.confirm')}
           </Button>
           <Button
             size="sm"
@@ -320,7 +328,7 @@ function EntityDraftCard({
             className="h-8 text-[hsl(var(--color-danger))] hover:text-[hsl(var(--color-danger))]"
             onClick={onReject}
           >
-            拒绝
+            {t('worldModel.common.reject')}
           </Button>
         </div>
       </div>
@@ -345,6 +353,7 @@ function RelationshipDraftCard({
   onReject: () => void
   onOpen: () => void
 }) {
+  const { t } = useUiLocale()
   const left = source?.name ?? String(rel.source_id)
   const right = target?.name ?? String(rel.target_id)
   return (
@@ -363,10 +372,10 @@ function RelationshipDraftCard({
         </div>
         <div className="shrink-0 flex items-center gap-2">
           <Button size="sm" variant="outline" className="h-8" onClick={onOpen}>
-            定位
+            {t('worldModel.common.locate')}
           </Button>
           <Button size="sm" variant="outline" className="h-8" onClick={onConfirm}>
-            {LABELS.CONFIRM}
+            {t('dialog.confirm')}
           </Button>
           <Button
             size="sm"
@@ -374,7 +383,7 @@ function RelationshipDraftCard({
             className="h-8 text-[hsl(var(--color-danger))] hover:text-[hsl(var(--color-danger))]"
             onClick={onReject}
           >
-            拒绝
+            {t('worldModel.common.reject')}
           </Button>
         </div>
       </div>
@@ -395,13 +404,14 @@ function SystemDraftCard({
   onReject: () => void
   onOpen?: () => void
 }) {
+  const { locale, t } = useUiLocale()
   return (
     <CardShell id={`draft-systems-${system.id}`} highlighted={highlighted}>
       <div className="flex items-start gap-4">
         <div className="flex-1 min-w-0 space-y-1">
           <div className="flex items-center gap-2">
             <div className="text-sm font-semibold truncate">{system.name || '\u00A0'}</div>
-            <span className="text-xs text-muted-foreground">{getSystemDisplayTypeLabel(system.display_type)}</span>
+            <span className="text-xs text-muted-foreground">{getSystemDisplayTypeLabel(system.display_type, locale)}</span>
             <span className="text-xs text-[hsl(var(--color-status-draft))]">● draft</span>
           </div>
           {system.description ? (
@@ -411,11 +421,11 @@ function SystemDraftCard({
         <div className="shrink-0 flex items-center gap-2">
           {onOpen ? (
             <Button size="sm" variant="outline" className="h-8" onClick={onOpen}>
-              查看
+              {t('worldModel.common.view')}
             </Button>
           ) : null}
           <Button size="sm" variant="outline" className="h-8" onClick={onConfirm}>
-            {LABELS.CONFIRM}
+            {t('dialog.confirm')}
           </Button>
           <Button
             size="sm"
@@ -423,7 +433,7 @@ function SystemDraftCard({
             className="h-8 text-[hsl(var(--color-danger))] hover:text-[hsl(var(--color-danger))]"
             onClick={onReject}
           >
-            拒绝
+            {t('worldModel.common.reject')}
           </Button>
         </div>
       </div>

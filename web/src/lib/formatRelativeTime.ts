@@ -1,22 +1,24 @@
-export function formatRelativeTime(dateStr: string): string {
+import { translateUiMessage, type UiLocale } from '@/lib/uiMessages'
+
+export function formatRelativeTime(dateStr: string, locale: UiLocale = 'zh'): string {
   const ms = new Date(dateStr).getTime()
-  if (!Number.isFinite(ms)) return '刚刚'
+  if (!Number.isFinite(ms)) return translateUiMessage(locale, 'time.justNow')
 
   const diff = Date.now() - ms
   const mins = Math.floor(diff / 60000)
 
-  if (mins < 1) return '刚刚'
-  if (mins < 60) return `${mins} 分钟前`
+  if (mins < 1) return translateUiMessage(locale, 'time.justNow')
+  if (mins < 60) return translateUiMessage(locale, 'time.minutesAgo', { count: mins })
 
   const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs} 小时前`
+  if (hrs < 24) return translateUiMessage(locale, 'time.hoursAgo', { count: hrs })
 
   const days = Math.floor(hrs / 24)
-  if (days === 1) return '昨天'
-  if (days < 7) return `${days} 天前`
+  if (days === 1) return translateUiMessage(locale, 'time.yesterday')
+  if (days < 7) return translateUiMessage(locale, 'time.daysAgo', { count: days })
 
   const weeks = Math.floor(days / 7)
-  if (weeks < 5) return `${weeks} 周前`
+  if (weeks < 5) return translateUiMessage(locale, 'time.weeksAgo', { count: weeks })
 
-  return `${Math.floor(days / 30)} 月前`
+  return translateUiMessage(locale, 'time.monthsAgo', { count: Math.floor(days / 30) })
 }

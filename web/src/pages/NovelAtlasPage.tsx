@@ -38,6 +38,7 @@ import { useNovelCopilot } from '@/components/novel-copilot/NovelCopilotContext'
 import { buildWholeBookCopilotLaunchArgs } from '@/components/novel-copilot/novelCopilotLauncher'
 import { useAtlasCopilotTargetNavigation } from '@/components/novel-copilot/useCopilotTargetNavigation'
 import { MIN_NOVEL_SHELL_DRAWER_WIDTH } from '@/components/novel-shell/novelShellChromeState'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 
 const ATLAS_MIN_MAIN_STAGE_WIDTH = 760
 
@@ -48,6 +49,7 @@ function parseOptionalNumber(raw: string | null) {
 }
 
 export function NovelAtlasPage() {
+  const { t } = useUiLocale()
   const { novelId } = useParams<{ novelId: string }>()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -208,7 +210,7 @@ export function NovelAtlasPage() {
                     onClick={() => navigate(studioReturnPath ?? `/novel/${nid}`)}
                   >
                     <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
-                    返回工作台
+                    {t('worldModel.atlas.returnToStudio')}
                   </Button>
                 </div>
 
@@ -229,7 +231,7 @@ export function NovelAtlasPage() {
                         className="rounded-none border-b-2 border-transparent text-muted-foreground hover:text-foreground/70 data-[state=active]:border-accent data-[state=active]:text-foreground data-[state=active]:bg-transparent px-1 h-full"
                         data-testid="tab-review-indicator"
                       >
-                        草稿审核
+                        {t('worldModel.atlas.reviewTab')}
                       </TabsTrigger>
                     ) : null}
                   </TabsList>

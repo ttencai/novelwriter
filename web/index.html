@@ -15,6 +15,16 @@
         document.documentElement.style.colorScheme = t;
       } catch (e) {}
     </script>
+    <script>
+      try {
+        var savedLocale = localStorage.getItem('novwr_ui_locale');
+        var normalizedLocale = savedLocale === 'en' ? 'en' : savedLocale === 'zh' ? 'zh-CN' : null;
+        if (normalizedLocale) {
+          document.documentElement.lang = normalizedLocale;
+          document.documentElement.dataset.uiLocale = normalizedLocale === 'en' ? 'en' : 'zh';
+        }
+      } catch (e) {}
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

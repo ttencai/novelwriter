@@ -4,6 +4,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
 import { NovelShell } from '@/components/novel-shell/NovelShell'
 import { useNovelCopilot } from '@/components/novel-copilot/NovelCopilotContext'
 import { useNovelShell } from '@/components/novel-shell/NovelShellContext'
@@ -115,9 +116,11 @@ function renderWithShell(ui: ReactNode, initialEntry: string) {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        {ui}
-      </MemoryRouter>
+      <UiLocaleProvider>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          {ui}
+        </MemoryRouter>
+      </UiLocaleProvider>
     </QueryClientProvider>,
   )
 }
@@ -126,6 +129,8 @@ describe('NovelAtlasPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.stubGlobal('ResizeObserver', ResizeObserverMock)
+    localStorage.clear()
+    document.documentElement.lang = 'zh-CN'
     mockUseWorldEntities.mockReturnValue({
       data: [
         { id: 9, name: '苏瑶' },
@@ -260,6 +265,25 @@ describe('NovelAtlasPage', () => {
     await user.click(screen.getByRole('button', { name: '返回工作台' }))
 
     expect(screen.getByTestId('location-search')).toBeEmptyDOMElement()
+  })
+
+  it('renders the atlas chrome in English when the UI locale is en', () => {
+    localStorage.setItem('novwr_ui_locale', 'en')
+    document.documentElement.lang = 'en'
+
+    renderWithShell(
+      <>
+        <Routes>
+          <Route element={<NovelShell />}>
+            <Route path="/world/:novelId" element={<NovelAtlasPage />} />
+          </Route>
+        </Routes>
+      </>,
+      '/world/7?tab=review',
+    )
+
+    expect(screen.getByRole('button', { name: 'Return to Studio' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Draft review' })).toBeInTheDocument()
   })
 
   it('keeps atlas copilot open on narrow desktops by shrinking to the available width first', async () => {

@@ -1,20 +1,22 @@
-import { LABELS } from '@/constants/labels'
 import type { LegacySystemDisplayType } from '@/types/api'
+import { readDocumentUiLocale } from '@/lib/uiLocale'
+import { translateUiMessage, type UiLocale } from '@/lib/uiMessages'
 
 export function isLegacyGraphDisplayType(displayType: string): displayType is Extract<LegacySystemDisplayType, 'graph'> {
   return displayType === 'graph'
 }
 
-export function getSystemDisplayTypeLabel(displayType: string): string {
+export function getSystemDisplayTypeLabel(displayType: string, locale?: UiLocale): string {
+  const effectiveLocale = locale ?? readDocumentUiLocale() ?? 'zh'
   switch (displayType) {
     case 'hierarchy':
-      return LABELS.SYSTEM_TYPE_HIERARCHY
+      return translateUiMessage(effectiveLocale, 'worldModel.system.display.hierarchy')
     case 'timeline':
-      return LABELS.SYSTEM_TYPE_TIMELINE
+      return translateUiMessage(effectiveLocale, 'worldModel.system.display.timeline')
     case 'list':
-      return LABELS.SYSTEM_TYPE_LIST
+      return translateUiMessage(effectiveLocale, 'worldModel.system.display.list')
     case 'graph':
-      return LABELS.SYSTEM_TYPE_GRAPH_LEGACY
+      return translateUiMessage(effectiveLocale, 'worldModel.system.display.graph')
     default:
       return displayType || 'unknown'
   }

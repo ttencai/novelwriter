@@ -7,8 +7,8 @@ import { Input } from '@/components/ui/input'
 import { GlassSurface } from '@/components/ui/glass-surface'
 import { WorldBuildPanel } from '@/components/world-model/shared/WorldBuildPanel'
 import { useWorldSystems, useCreateSystem, useUpdateSystem, useDeleteSystem, useConfirmSystems, useRejectSystems } from '@/hooks/world/useSystems'
-import { LABELS } from '@/constants/labels'
 import { getSystemDisplayTypeLabel } from '@/lib/worldSystemDisplay'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import type { WorldSystem, SystemDisplayType } from '@/types/api'
 
 const DISPLAY_TYPES: SystemDisplayType[] = ['hierarchy', 'timeline', 'list']
@@ -25,6 +25,7 @@ export function SystemNavigator({ novelId, selectedId, onSelect, onOpenDraftRevi
   onSelect: (system: WorldSystem) => void
   onOpenDraftReview: (kind?: DraftReviewKind) => void
 }) {
+  const { locale, t } = useUiLocale()
   const { data: systems } = useWorldSystems(novelId)
   const createSystem = useCreateSystem(novelId)
   const updateSystem = useUpdateSystem(novelId)
@@ -83,7 +84,7 @@ export function SystemNavigator({ novelId, selectedId, onSelect, onOpenDraftRevi
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="shrink-0 p-4 space-y-3">
         <Input
-          placeholder={LABELS.SYSTEM_SEARCH_PLACEHOLDER}
+          placeholder={t('worldModel.system.searchPlaceholder')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="h-9 text-sm bg-transparent border-[var(--nw-glass-border)] placeholder:text-muted-foreground/70 focus-visible:ring-accent focus-visible:ring-offset-0"
@@ -95,7 +96,7 @@ export function SystemNavigator({ novelId, selectedId, onSelect, onOpenDraftRevi
             onClick={() => setShowTypeMenu(!showTypeMenu)}
             data-testid="system-new"
           >
-            {LABELS.SYSTEM_NEW}
+            {t('worldModel.system.new')}
           </button>
           {showTypeMenu && (
             <>
@@ -107,10 +108,10 @@ export function SystemNavigator({ novelId, selectedId, onSelect, onOpenDraftRevi
                 {DISPLAY_TYPES.map(t => (
                   <button
                     key={t}
-                    className="block w-full text-left px-4 py-2 text-sm hover:bg-[var(--nw-glass-bg-hover)]"
-                    onClick={() => handleCreate(t)}
-                  >
-                    {getSystemDisplayTypeLabel(t)}
+                  className="block w-full text-left px-4 py-2 text-sm hover:bg-[var(--nw-glass-bg-hover)]"
+                  onClick={() => handleCreate(t)}
+                >
+                    {getSystemDisplayTypeLabel(t, locale)}
                   </button>
                 ))}
               </GlassSurface>
@@ -125,14 +126,14 @@ export function SystemNavigator({ novelId, selectedId, onSelect, onOpenDraftRevi
               onClick={() => confirmSystems.mutate(draftIds)}
               disabled={confirmSystems.isPending}
             >
-              全部确认 ({draftIds.length})
+              {t('dialog.confirm')} {t('worldModel.common.all')} ({draftIds.length})
             </button>
             <button
               className="text-xs text-[hsl(var(--color-danger))] hover:bg-[hsl(var(--color-danger)/0.10)] rounded px-1 -mx-1 transition-colors"
               onClick={() => { if (draftIds.length > 0) setRejectAllConfirm(draftIds) }}
               disabled={rejectSystems.isPending}
             >
-              全部拒绝 ({draftIds.length})
+              {t('worldModel.common.all')} {t('worldModel.common.reject')} ({draftIds.length})
             </button>
           </div>
         )}
@@ -165,7 +166,7 @@ export function SystemNavigator({ novelId, selectedId, onSelect, onOpenDraftRevi
               <div className="text-sm font-medium truncate text-foreground">{sys.name || '\u00A0'}</div>
               {sys.description && <div className="text-xs text-muted-foreground line-clamp-1">{sys.description}</div>}
             </div>
-            <span className="text-xs text-muted-foreground shrink-0">{getSystemDisplayTypeLabel(sys.display_type)}</span>
+            <span className="text-xs text-muted-foreground shrink-0">{getSystemDisplayTypeLabel(sys.display_type, locale)}</span>
             {sys.constraints.length > 0 && (
               <span className="text-xs text-muted-foreground shrink-0">{sys.constraints.length}</span>
             )}
@@ -178,7 +179,7 @@ export function SystemNavigator({ novelId, selectedId, onSelect, onOpenDraftRevi
                 <button
                   onClick={(e) => { e.stopPropagation(); confirmSystems.mutate([sys.id]) }}
                   className="rounded p-0.5 text-muted-foreground hover:text-[hsl(var(--color-status-confirmed))] hover:bg-[hsl(var(--color-status-confirmed)/0.10)] transition-colors"
-                  title="确认"
+                  title={t('dialog.confirm')}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="20 6 9 17 4 12" />
@@ -187,7 +188,7 @@ export function SystemNavigator({ novelId, selectedId, onSelect, onOpenDraftRevi
                 <button
                   onClick={(e) => { e.stopPropagation(); rejectSystems.mutate([sys.id]) }}
                   className="rounded p-0.5 text-muted-foreground hover:text-[hsl(var(--color-danger))] hover:bg-[hsl(var(--color-danger)/0.10)] transition-colors"
-                  title="拒绝"
+                  title={t('worldModel.common.reject')}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="18" y1="6" x2="6" y2="18" />
@@ -212,7 +213,7 @@ export function SystemNavigator({ novelId, selectedId, onSelect, onOpenDraftRevi
                 }}
                 onMouseLeave={() => { if (confirmId === sys.id) setConfirmId(null) }}
               >
-                {confirmId === sys.id ? LABELS.SYSTEM_DELETE_CONFIRM : '×'}
+                {confirmId === sys.id ? t('worldModel.system.deleteConfirm') : '×'}
               </button>
             )}
           </div>
@@ -227,13 +228,13 @@ export function SystemNavigator({ novelId, selectedId, onSelect, onOpenDraftRevi
       <ConfirmDialog
         open={rejectAllConfirm !== null}
         tone="destructive"
-        title="拒绝全部草稿体系？"
+        title={t('worldModel.system.rejectAllTitle')}
         description={
           rejectAllConfirm
-            ? `将删除 ${rejectAllConfirm.length} 个草稿体系。\n此操作不可撤销。`
+            ? t('worldModel.system.rejectAllDescription', { count: rejectAllConfirm.length })
             : undefined
         }
-        confirmText="拒绝并删除"
+        confirmText={t('worldModel.system.rejectAllConfirm')}
         onConfirm={() => {
           const ids = rejectAllConfirm ?? []
           setRejectAllConfirm(null)

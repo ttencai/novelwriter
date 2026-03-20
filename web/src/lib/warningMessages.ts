@@ -1,3 +1,5 @@
+import { readDocumentUiLocale } from '@/lib/uiLocale'
+
 type WarningLocale = 'zh' | 'en'
 
 type WarningLike = {
@@ -82,12 +84,75 @@ const warningMessageCatalog: Record<WarningLocale, Record<string, WarningTransla
     'continuation.prosecheck.warning.summary_tone': ({ phrase }) =>
       `检测到总结/分析式表达“${asString(phrase)}”，可能不适合正文叙事`,
   },
-  en: {},
+  en: {
+    'worldpack.import.warning.ambiguous_alias': ({ alias, entity_keys }) =>
+      `Alias "${asString(alias)}" points to multiple entities: ${asString(entity_keys)}`,
+    'worldpack.import.warning.entity_missing_name': ({ key }) =>
+      `Entity "${asString(key)}" is missing a name and was skipped`,
+    'worldpack.import.warning.entity_missing_name_preserve_existing': ({ key }) =>
+      `Entity "${asString(key)}" is missing a name; the existing row was kept for relationship resolution`,
+    'worldpack.import.warning.entity_name_conflict': ({ name }) =>
+      `Entity name "${asString(name)}" already exists and is bound to another worldpack identity, so it was skipped`,
+    'worldpack.import.warning.entity_linked_by_name': ({ key, name }) =>
+      `Entity "${asString(key)}" was linked to an existing row by name "${asString(name)}"`,
+    'worldpack.import.warning.relationship_missing_label': () =>
+      'A relationship was missing its label and was skipped',
+    'worldpack.import.warning.relationship_missing_refs': ({ source_key, target_key }) =>
+      `A relationship is missing references: source_key='${asString(source_key)}', target_key='${asString(target_key)}'`,
+    'worldpack.import.warning.system_missing_name': () =>
+      'A system was missing its name and was skipped',
+    'worldpack.import.warning.system_name_conflict': ({ name }) =>
+      `System name "${asString(name)}" is already used by another pack, so it was skipped`,
+    'worldpack.import.warning.skip_delete_promoted_entity': ({ key }) =>
+      `Entity "${asString(key)}" has non-worldpack dependencies and was preserved`,
+    'worldpack.import.warning.preserved_entities_skipped': ({ count, sample }) =>
+      `Skipped overwriting ${asString(count)} protected entities: ${asString(sample)}`,
+    'worldpack.import.warning.preserved_attributes_skipped': ({ count, sample, more_entities_count }) =>
+      `Skipped overwriting ${asString(count)} protected attributes: ${asString(sample)}${
+        Number(more_entities_count ?? 0) > 0 ? ` (+${asString(more_entities_count)} more entities)` : ''
+      }`,
+    'worldpack.import.warning.preserved_relationships_skipped': ({ count, sample }) =>
+      `Skipped overwriting ${asString(count)} protected relationships: ${asString(sample)}`,
+    'worldpack.import.warning.preserved_systems_skipped': ({ count, sample }) =>
+      `Skipped overwriting ${asString(count)} protected systems: ${asString(sample)}`,
+    'worldpack.import.warning.duplicate_entity_key': ({ key }) =>
+      `Duplicate entity key "${asString(key)}" found in the payload and skipped`,
+
+    'world.generate.warning.system_item_missing_time': () =>
+      'A timeline item was missing its time and was skipped',
+    'world.generate.warning.system_display_type_conflict': ({ name, downgraded_display_type }) =>
+      `System "${asString(name)}" had conflicting structure types across chunks, so it was downgraded to ${asString(downgraded_display_type)}`,
+    'world.generate.warning.entity_missing_name': () =>
+      'An entity had an empty name and was skipped',
+    'world.generate.warning.relationship_missing_fields': () =>
+      'A relationship was missing source, target, or label and was skipped',
+    'world.generate.warning.relationship_unknown_entity': ({ source, target }) =>
+      `A relationship referenced an unknown entity and was discarded (${asString(source)} -> ${asString(target)})`,
+    'world.generate.warning.relationship_self_reference': ({ entity }) =>
+      `A relationship pointed back to the same entity and was skipped (${asString(entity)})`,
+    'world.generate.warning.relationship_duplicate': ({ label }) =>
+      `A duplicate relationship was discarded (${asString(label)})`,
+    'world.generate.warning.system_missing_name': () =>
+      'A system had an empty name and was skipped',
+    'world.generate.warning.system_duplicate': ({ name }) =>
+      `A duplicate system name was discarded (${asString(name)})`,
+    'world.generate.warning.system_name_conflict': ({ name }) =>
+      `A system name already exists and was skipped (${asString(name)})`,
+
+    'continuation.prosecheck.warning.repeated_ngram': ({ phrase, count }) =>
+      `Repeated phrase "${asString(phrase)}" detected (${asString(count)} times)`,
+    'continuation.prosecheck.warning.long_paragraph': ({ length, unit }) =>
+      `Long paragraph detected (about ${asString(length)} ${asString(unit)})`,
+    'continuation.prosecheck.warning.abnormal_sentence_length': ({ length, unit }) =>
+      `Long sentence detected (about ${asString(length)} ${asString(unit)})`,
+    'continuation.prosecheck.warning.summary_tone': ({ phrase }) =>
+      `Summary/analysis-style wording "${asString(phrase)}" detected and may not fit body prose`,
+  },
 }
 
 export function renderWarningMessage(
   warning: WarningLike,
-  locale: WarningLocale = 'zh',
+  locale: WarningLocale = readDocumentUiLocale() ?? 'zh',
 ): string {
   const key = typeof warning.message_key === 'string' ? warning.message_key : ''
   const params = warning.message_params ?? {}

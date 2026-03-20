@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createElement } from 'react'
+import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
 import { BootstrapPanel } from '@/components/world-model/shared/BootstrapPanel'
 import { ToastProvider } from '@/components/world-model/shared/Toast'
 import type { BootstrapJobResponse, WindowIndexState } from '@/types/api'
@@ -47,7 +48,11 @@ function renderPanel() {
     createElement(
       QueryClientProvider,
       { client: qc },
-      createElement(ToastProvider, null, createElement(BootstrapPanel, { novelId: 1 }))
+      createElement(
+        UiLocaleProvider,
+        null,
+        createElement(ToastProvider, null, createElement(BootstrapPanel, { novelId: 1 })),
+      )
     )
   )
 }
@@ -59,6 +64,8 @@ describe('BootstrapPanel invariants', () => {
     vi.restoreAllMocks()
     mockUseTriggerBootstrap.mockReturnValue({ mutate: mutateFn, isPending: false })
     mockUseNovelWindowIndex.mockReturnValue({ data: freshIndexState })
+    localStorage.clear()
+    document.documentElement.lang = 'zh-CN'
   })
 
   it('BI-03 first-run primary CTA should be extraction, not index maintenance', () => {

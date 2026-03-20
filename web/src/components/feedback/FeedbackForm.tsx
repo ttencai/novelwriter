@@ -1,22 +1,7 @@
 import { useState } from "react"
 import { X } from "lucide-react"
+import { useUiLocale } from "@/contexts/UiLocaleContext"
 import { NwButton } from "@/components/ui/nw-button"
-
-const RATING_OPTIONS = [
-    { value: "great", label: "很好，超出预期" },
-    { value: "good", label: "还不错，有潜力" },
-    { value: "okay", label: "一般，需要改进" },
-    { value: "poor", label: "不太行，问题较多" },
-]
-
-const ISSUE_OPTIONS = [
-    { value: "speed", label: "生成速度太慢" },
-    { value: "quality", label: "生成文本质量不够好" },
-    { value: "ux", label: "操作流程不够直观" },
-    { value: "bugs", label: "遇到了 Bug" },
-    { value: "other", label: "其他问题" },
-    { value: "none", label: "暂时没有明显问题" },
-]
 
 function RadioGroup({ name, options, value, onChange }: {
     name: string
@@ -120,6 +105,7 @@ export function FeedbackForm({ onSubmit, onCancel, submitting }: {
     onCancel: () => void
     submitting: boolean
 }) {
+    const { t } = useUiLocale()
     const [rating, setRating] = useState("")
     const [issues, setIssues] = useState<string[]>([])
     const [bugDesc, setBugDesc] = useState("")
@@ -129,6 +115,20 @@ export function FeedbackForm({ onSubmit, onCancel, submitting }: {
     const hasBugs = issues.includes("bugs")
     const hasOther = issues.includes("other")
     const bonusQualified = suggestionQualifies(suggestion)
+    const ratingOptions = [
+        { value: "great", label: t('feedback.rating.great') },
+        { value: "good", label: t('feedback.rating.good') },
+        { value: "okay", label: t('feedback.rating.okay') },
+        { value: "poor", label: t('feedback.rating.poor') },
+    ]
+    const issueOptions = [
+        { value: "speed", label: t('feedback.issue.speed') },
+        { value: "quality", label: t('feedback.issue.quality') },
+        { value: "ux", label: t('feedback.issue.ux') },
+        { value: "bugs", label: t('feedback.issue.bugs') },
+        { value: "other", label: t('feedback.issue.other') },
+        { value: "none", label: t('feedback.issue.none') },
+    ]
 
     const canSubmit =
         rating !== "" &&
@@ -152,30 +152,30 @@ export function FeedbackForm({ onSubmit, onCancel, submitting }: {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
             <div className="w-[480px] max-h-[90vh] overflow-y-auto rounded-2xl border border-[var(--nw-glass-border)] bg-[hsl(var(--nw-modal-bg))] backdrop-blur-xl p-8 flex flex-col gap-6">
                 <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-semibold">使用反馈</h3>
+                    <h3 className="text-lg font-semibold">{t('feedback.title')}</h3>
                     <button type="button" onClick={onCancel} className="text-muted-foreground hover:text-foreground transition-colors">
                         <X className="h-5 w-5" />
                     </button>
                 </div>
 
                 <p className="text-[13px] text-muted-foreground">
-                    填写以下反馈即可获得额外生成额度。你的反馈对我们非常重要。
+                    {t('feedback.description')}
                 </p>
 
                 <div className="flex flex-col gap-2">
-                    <span className="text-sm font-medium">1. 整体体验如何？</span>
-                    <RadioGroup name="overall_rating" options={RATING_OPTIONS} value={rating} onChange={setRating} />
+                    <span className="text-sm font-medium">{t('feedback.question.rating')}</span>
+                    <RadioGroup name="overall_rating" options={ratingOptions} value={rating} onChange={setRating} />
                 </div>
 
                 <div className="flex flex-col gap-2">
-                    <span className="text-sm font-medium">2. 遇到了什么问题？（可多选）</span>
-                    <CheckboxGroup options={ISSUE_OPTIONS} selected={issues} onChange={setIssues} />
+                    <span className="text-sm font-medium">{t('feedback.question.issues')}</span>
+                    <CheckboxGroup options={issueOptions} selected={issues} onChange={setIssues} />
 
                     {hasBugs && (
                         <textarea
                             value={bugDesc}
                             onChange={e => setBugDesc(e.target.value)}
-                            placeholder="简要描述一下遇到的 Bug，例如：上传小说后页面白屏"
+                            placeholder={t('feedback.placeholder.bug')}
                             className="mt-1 w-full min-h-[60px] rounded-lg border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] px-3 py-2 text-[13px] text-foreground placeholder:text-muted-foreground/60 resize-none focus:outline-none focus:ring-1 focus:ring-[hsl(var(--accent))]"
                         />
                     )}
@@ -184,24 +184,24 @@ export function FeedbackForm({ onSubmit, onCancel, submitting }: {
                         <textarea
                             value={otherDesc}
                             onChange={e => setOtherDesc(e.target.value)}
-                            placeholder="具体是什么问题？"
+                            placeholder={t('feedback.placeholder.other')}
                             className="mt-1 w-full min-h-[60px] rounded-lg border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] px-3 py-2 text-[13px] text-foreground placeholder:text-muted-foreground/60 resize-none focus:outline-none focus:ring-1 focus:ring-[hsl(var(--accent))]"
                         />
                     )}
                 </div>
 
                 <div className="flex flex-col gap-2">
-                    <span className="text-sm font-medium">3. 改进建议（可选）</span>
+                    <span className="text-sm font-medium">{t('feedback.question.suggestion')}</span>
                     <textarea
                         value={suggestion}
                         onChange={e => setSuggestion(e.target.value)}
-                        placeholder="有什么想法或建议？"
+                        placeholder={t('feedback.placeholder.suggestion')}
                         className="w-full min-h-[80px] rounded-lg border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] px-3 py-2 text-[13px] text-foreground placeholder:text-muted-foreground/60 resize-none focus:outline-none focus:ring-1 focus:ring-[hsl(var(--accent))]"
                     />
                     <p className={`text-[12px] transition-colors ${bonusQualified ? 'text-[hsl(var(--accent))]' : 'text-muted-foreground/60'}`}>
                         {bonusQualified
-                            ? "提交可获得 30 次额度"
-                            : "填写不少于 20 字的建议，额度从 20 次提升至 30 次"}
+                            ? t('feedback.bonus.max')
+                            : t('feedback.bonus.upgrade')}
                     </p>
                 </div>
 
@@ -211,7 +211,7 @@ export function FeedbackForm({ onSubmit, onCancel, submitting }: {
                     disabled={!canSubmit || submitting}
                     className="w-full h-11 rounded-xl font-medium text-sm"
                 >
-                    {submitting ? "提交中..." : `提交反馈，获得 ${bonusQualified ? 30 : 20} 次额度`}
+                    {submitting ? t('feedback.submit.loading') : t('feedback.submit.button', { count: bonusQualified ? 30 : 20 })}
                 </NwButton>
             </div>
         </div>

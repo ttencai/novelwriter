@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { cn } from '@/lib/utils'
 
 type SiteFooterProps = {
@@ -6,13 +7,14 @@ type SiteFooterProps = {
   className?: string
 }
 
-const links = [
-  { to: '/terms', label: '用户规则' },
-  { to: '/privacy', label: '隐私说明' },
-  { to: '/copyright', label: '版权投诉' },
-]
-
 export function SiteFooter({ compact, className }: SiteFooterProps) {
+  const { t } = useUiLocale()
+  const links = [
+    { to: '/terms', label: t('footer.link.terms') },
+    { to: '/privacy', label: t('footer.link.privacy') },
+    { to: '/copyright', label: t('footer.link.copyright') },
+  ]
+
   return (
     <footer
       className={cn(
@@ -30,7 +32,7 @@ export function SiteFooter({ compact, className }: SiteFooterProps) {
         <div className="flex flex-col gap-1">
           <div className="font-mono text-base font-bold text-foreground">NovWr</div>
           <p className="max-w-[34rem] text-sm leading-6 text-muted-foreground">
-            面向长篇创作的 AI 辅助写作与续写工具。使用本服务前，请阅读相关规则、隐私说明与版权投诉说明。
+            {t('footer.description')}
           </p>
         </div>
 
