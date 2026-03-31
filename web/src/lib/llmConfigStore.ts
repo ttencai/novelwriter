@@ -29,6 +29,15 @@ export function setLlmConfig(value: Partial<LlmConfig>): LlmConfig {
   return getLlmConfig()
 }
 
+export function initializeLlmConfig(value: Partial<LlmConfig>): LlmConfig {
+  const hasUserValue = Boolean(currentConfig.baseUrl || currentConfig.apiKey || currentConfig.model)
+  if (hasUserValue) {
+    return getLlmConfig()
+  }
+  currentConfig = normalize({ ...EMPTY_CONFIG, ...value })
+  return getLlmConfig()
+}
+
 export function clearLlmConfig(): void {
   currentConfig = { ...EMPTY_CONFIG }
 }

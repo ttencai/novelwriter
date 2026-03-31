@@ -3,7 +3,7 @@ import { useUiLocale } from "@/contexts/UiLocaleContext"
 import { getLlmApiErrorMessage, getLlmConfigWarning } from "@/lib/llmErrorMessages"
 import { api, ApiError } from "@/services/api"
 import { translateUiMessage } from "@/lib/uiMessages"
-import { clearLlmConfig, getLlmConfig, setLlmConfig } from "@/lib/llmConfigStore"
+import { clearLlmConfig, getLlmConfig, initializeLlmConfig, setLlmConfig } from "@/lib/llmConfigStore"
 
 const IS_HOSTED = (import.meta.env.VITE_DEPLOY_MODE || "selfhost") === "hosted"
 
@@ -13,6 +13,8 @@ export function LlmConfigCard() {
     const [apiKey, setApiKey] = useState("")
     const [model, setModel] = useState("")
     const [testing, setTesting] = useState(false)
+    const [fetchingModels, setFetchingModels] = useState(false)
+    const [models, setModels] = useState<string[]>([])
     const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
 
     useEffect(() => {
@@ -20,6 +22,27 @@ export function LlmConfigCard() {
         setBaseUrl(config.baseUrl)
         setApiKey(config.apiKey)
         setModel(config.model)
+
+        let cancelled = false
+        api.getLlmConfigDefaults()
+            .then((defaults) => {
+                if (cancelled) return
+                const merged = initializeLlmConfig({
+                    baseUrl: defaults.base_url,
+                    apiKey: defaults.api_key,
+                    model: defaults.model,
+                })
+                setBaseUrl(merged.baseUrl)
+                setApiKey(merged.apiKey)
+                setModel(merged.model)
+            })
+            .catch(() => {
+                // ignore defaults load failure; local tab state still works
+            })
+
+        return () => {
+            cancelled = true
+        }
     }, [])
 
     const save = () => {
@@ -29,6 +52,7 @@ export function LlmConfigCard() {
             model: model.trim(),
         })
     }
+
     const partialConfigWarning = getLlmConfigWarning({
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
@@ -54,6 +78,30 @@ export function LlmConfigCard() {
             }
         } finally {
             setTesting(false)
+        }
+    }
+
+    const fetchModels = async () => {
+        save()
+        setFetchingModels(true)
+        setResult(null)
+        try {
+            const res = await api.listLlmModels()
+            const ids = res.models.map((item) => item.id)
+            setModels(ids)
+            if (!model.trim() && ids.length > 0) {
+                setModel(ids[0])
+                setLlmConfig({ model: ids[0] })
+            }
+            setResult({ ok: true, message: translateUiMessage(locale, 'llm.result.modelsLoaded', { count: ids.length }) })
+        } catch (e) {
+            if (e instanceof ApiError) {
+                setResult({ ok: false, message: getLlmApiErrorMessage(e, locale) ?? t('llm.result.modelsLoadFailed') })
+            } else {
+                setResult({ ok: false, message: e instanceof Error ? e.message : t('llm.result.modelsLoadFailed') })
+            }
+        } finally {
+            setFetchingModels(false)
         }
     }
 
@@ -109,15 +157,31 @@ export function LlmConfigCard() {
                 <label className="text-sm font-medium" htmlFor="llm-model">
                     {t('llm.label.model')}
                 </label>
-                <input
-                    id="llm-model"
-                    type="text"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    onBlur={save}
-                    placeholder="gpt-4o-mini"
-                    className="h-10 rounded-lg border border-[var(--nw-glass-border)] bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                />
+                <div className="flex gap-2">
+                    <input
+                        id="llm-model"
+                        type="text"
+                        value={model}
+                        list="llm-model-options"
+                        onChange={(e) => setModel(e.target.value)}
+                        onBlur={save}
+                        placeholder="gpt-4o-mini"
+                        className="h-10 flex-1 rounded-lg border border-[var(--nw-glass-border)] bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    />
+                    <button
+                        type="button"
+                        onClick={fetchModels}
+                        disabled={fetchingModels || !baseUrl || !apiKey}
+                        className="shrink-0 px-4 h-10 rounded-[10px] border border-[var(--nw-glass-border)] text-sm font-medium text-muted-foreground transition-colors hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                        {fetchingModels ? t('llm.button.fetchingModels') : t('llm.button.fetchModels')}
+                    </button>
+                </div>
+                <datalist id="llm-model-options">
+                    {models.map((item) => (
+                        <option key={item} value={item} />
+                    ))}
+                </datalist>
             </div>
 
             <button
@@ -136,6 +200,7 @@ export function LlmConfigCard() {
                     setBaseUrl("")
                     setApiKey("")
                     setModel("")
+                    setModels([])
                     setResult(null)
                 }}
                 className="flex items-center justify-center h-10 rounded-[10px] border border-[var(--nw-glass-border)] text-sm font-medium text-muted-foreground transition-colors hover:bg-white/5"

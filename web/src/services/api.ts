@@ -156,6 +156,14 @@ export const api = {
     )
   },
 
+  getLlmConfigDefaults: () =>
+    request<{ base_url: string; api_key: string; model: string }>('/api/llm/config'),
+
+  listLlmModels: () =>
+    request<{ models: { id: string; owned_by?: string | null }[] }>('/api/llm/models', {
+      headers: llmHeaders(),
+    }),
+
   testLlmConnection: () =>
     request<{ ok: boolean; model?: string; latency_ms?: number; error?: string; message?: string; capabilities?: { basic: boolean; stream: boolean; json_mode: boolean } }>('/api/llm/test', {
       method: 'POST',

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database import get_db
 from app.core.auth import get_current_user_or_default
 from app.core.ai_client import (
@@ -105,6 +106,71 @@ def _build_capability_error(capabilities: dict[str, bool], errors: dict[str, str
     detail_parts = [errors[key] for key in ("stream", "json_mode") if errors.get(key)]
     detail = f"；详情：{'；'.join(detail_parts)}" if detail_parts else ""
     return f"基础连接成功，但当前模型/接口不支持 {missing_text}{detail}"
+
+
+@router.get("/config")
+async def get_llm_defaults(_user=Depends(get_current_user_or_default)):
+    settings = get_settings()
+    return {
+        "base_url": settings.openai_base_url,
+        "api_key": settings.openai_api_key,
+        "model": settings.openai_model,
+    }
+
+
+@router.get("/models")
+async def list_llm_models(
+    request: Request,
+    _user=Depends(get_current_user_or_default),
+    db: Session = Depends(get_db),
+):
+    config = get_llm_config(request)
+    if not config or not config.get("base_url") or not config.get("api_key"):
+        settings = get_settings()
+        if settings.openai_base_url and settings.openai_api_key:
+            config = {
+                "base_url": settings.openai_base_url,
+                "api_key": settings.openai_api_key,
+                "model": settings.openai_model,
+                "billing_source_hint": "selfhost" if settings.deploy_mode != "hosted" else "hosted",
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Missing LLM config")
+
+    using_request_override = bool(
+        request.headers.get("x-llm-base-url")
+        and request.headers.get("x-llm-api-key")
+        and request.headers.get("x-llm-model")
+    )
+    billing_source = _resolve_billing_source(
+        config.get("billing_source_hint"),
+        using_request_override=using_request_override,
+    )
+    ensure_ai_available(db, billing_source=billing_source)
+
+    client = AsyncOpenAI(
+        base_url=_normalize_base_url(config["base_url"]),
+        api_key=config["api_key"],
+        timeout=15.0,
+    )
+
+    try:
+        response = await client.models.list()
+        items = getattr(response, "data", []) or []
+        models = sorted(
+            [
+                {
+                    "id": getattr(item, "id", ""),
+                    "owned_by": getattr(item, "owned_by", None),
+                }
+                for item in items
+                if getattr(item, "id", None)
+            ],
+            key=lambda x: x["id"],
+        )
+        return {"models": models}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"获取模型列表失败: {_probe_error_message(exc)}")
 
 
 @router.post("/test")
