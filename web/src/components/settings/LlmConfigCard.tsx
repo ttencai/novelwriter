@@ -15,6 +15,7 @@ export function LlmConfigCard() {
     const [testing, setTesting] = useState(false)
     const [fetchingModels, setFetchingModels] = useState(false)
     const [models, setModels] = useState<string[]>([])
+    const [showModelList, setShowModelList] = useState(false)
     const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
 
     useEffect(() => {
@@ -53,6 +54,13 @@ export function LlmConfigCard() {
         })
     }
 
+    const selectModel = (value: string) => {
+        setModel(value)
+        setLlmConfig({ model: value })
+        setShowModelList(false)
+        setResult({ ok: true, message: translateUiMessage(locale, 'llm.result.modelSelected', { model: value }) })
+    }
+
     const partialConfigWarning = getLlmConfigWarning({
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
@@ -89,6 +97,7 @@ export function LlmConfigCard() {
             const res = await api.listLlmModels()
             const ids = res.models.map((item) => item.id)
             setModels(ids)
+            setShowModelList(ids.length > 0)
             if (!model.trim() && ids.length > 0) {
                 setModel(ids[0])
                 setLlmConfig({ model: ids[0] })
@@ -100,6 +109,7 @@ export function LlmConfigCard() {
             } else {
                 setResult({ ok: false, message: e instanceof Error ? e.message : t('llm.result.modelsLoadFailed') })
             }
+            setShowModelList(false)
         } finally {
             setFetchingModels(false)
         }
@@ -153,7 +163,7 @@ export function LlmConfigCard() {
                 />
             </div>
 
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5 relative">
                 <label className="text-sm font-medium" htmlFor="llm-model">
                     {t('llm.label.model')}
                 </label>
@@ -162,8 +172,8 @@ export function LlmConfigCard() {
                         id="llm-model"
                         type="text"
                         value={model}
-                        list="llm-model-options"
                         onChange={(e) => setModel(e.target.value)}
+                        onFocus={() => setShowModelList(models.length > 0)}
                         onBlur={save}
                         placeholder="gpt-4o-mini"
                         className="h-10 flex-1 rounded-lg border border-[var(--nw-glass-border)] bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
@@ -177,11 +187,21 @@ export function LlmConfigCard() {
                         {fetchingModels ? t('llm.button.fetchingModels') : t('llm.button.fetchModels')}
                     </button>
                 </div>
-                <datalist id="llm-model-options">
-                    {models.map((item) => (
-                        <option key={item} value={item} />
-                    ))}
-                </datalist>
+                {showModelList && models.length > 0 ? (
+                    <div className="absolute top-full z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] p-1 shadow-2xl backdrop-blur-xl">
+                        {models.map((item) => (
+                            <button
+                                key={item}
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => selectModel(item)}
+                                className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-white/8 ${item === model ? 'bg-white/10 text-accent' : 'text-foreground'}`}
+                            >
+                                {item}
+                            </button>
+                        ))}
+                    </div>
+                ) : null}
             </div>
 
             <button
@@ -201,6 +221,7 @@ export function LlmConfigCard() {
                     setApiKey("")
                     setModel("")
                     setModels([])
+                    setShowModelList(false)
                     setResult(null)
                 }}
                 className="flex items-center justify-center h-10 rounded-[10px] border border-[var(--nw-glass-border)] text-sm font-medium text-muted-foreground transition-colors hover:bg-white/5"
