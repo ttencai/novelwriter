@@ -23,7 +23,6 @@ class StructuredOutputParseError(ValueError):
     """Raised when an LLM returns output that cannot be parsed into the response model."""
 
     def __init__(self, *, max_retries: int, last_error: Exception | None = None):
-        # Keep prefix stable for callers that key off the message.
         message = f"Failed to parse structured output after {max_retries} retries"
         if last_error is not None:
             message = f"{message}: {type(last_error).__name__}"
@@ -40,7 +39,7 @@ class ToolCallUnsupportedError(RuntimeError):
 class ToolCall:
     id: str
     name: str
-    arguments: str  # raw JSON string
+    arguments: str
 
 
 @dataclass(slots=True)
@@ -51,10 +50,7 @@ class ToolLLMResponse:
     prompt_tokens: int = 0
     completion_tokens: int = 0
 
-# Estimated cost per 1M tokens (input, output) in USD.
-#
-# Hosted operators can override these via env when using Vertex/OpenAI-compatible
-# gateways so the budget hard-stop tracks their actual provider pricing.
+
 _COST_TABLE = {
     "gemini-3.0-flash": (0.5, 3),
 }
@@ -98,9 +94,15 @@ def _resolve_billing_source(
     return _BILLING_SOURCE_SELFHOST
 
 
-def _record_usage(model: str, prompt_tokens: int, completion_tokens: int,
-                  endpoint: str = "", node_name: str | None = None, user_id: int | None = None,
-                  billing_source: str = _BILLING_SOURCE_SELFHOST) -> None:
+def _record_usage(
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    endpoint: str = "",
+    node_name: str | None = None,
+    user_id: int | None = None,
+    billing_source: str = _BILLING_SOURCE_SELFHOST,
+) -> None:
     """Persist token usage to DB. Non-blocking — failures are logged, never raised."""
     if os.getenv("DISABLE_TOKEN_USAGE_RECORDING", "").lower() in {"1", "true", "yes", "on"}:
         return
@@ -108,6 +110,7 @@ def _record_usage(model: str, prompt_tokens: int, completion_tokens: int,
     try:
         from app.database import SessionLocal
         from app.models import TokenUsage
+
         total = prompt_tokens + completion_tokens
         record = TokenUsage(
             user_id=user_id,
@@ -130,8 +133,15 @@ def _record_usage(model: str, prompt_tokens: int, completion_tokens: int,
         logger.warning("Failed to record token usage", exc_info=True)
 
 
+def _normalize_base_url(base_url: str) -> str:
+    base_url = (base_url or "").rstrip("/")
+    for suffix in ("/chat/completions", "/responses"):
+        if base_url.endswith(suffix):
+            base_url = base_url[: -len(suffix)]
+    return base_url.rstrip("/")
+
+
 def _stream_options_unsupported(exc: Exception) -> bool:
-    """Return True if a provider/gateway rejects the `stream_options` parameter."""
     if isinstance(exc, TypeError) and "stream_options" in str(exc):
         return True
 
@@ -143,7 +153,6 @@ def _stream_options_unsupported(exc: Exception) -> bool:
     if "stream_options" not in message and "include_usage" not in message:
         return False
 
-    # Conservative: only retry when it's very likely an unknown-argument style failure.
     return any(
         hint in message
         for hint in (
@@ -160,7 +169,6 @@ def _stream_options_unsupported(exc: Exception) -> bool:
 
 
 def _tool_call_unsupported(exc: Exception) -> bool:
-    """Return True if a provider/gateway rejects the `tools` parameter."""
     status_code = getattr(exc, "status_code", None)
     if status_code not in {None, 400, 422}:
         return False
@@ -184,27 +192,84 @@ def _tool_call_unsupported(exc: Exception) -> bool:
     )
 
 
+def _responses_unsupported(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    if status_code not in {None, 400, 404, 405, 422}:
+        return False
+    message = str(exc).lower()
+    return any(
+        hint in message
+        for hint in (
+            "/v1/responses",
+            "unsupported response",
+            "unsupported responses",
+            "responses is not supported",
+            "unknown url",
+            "not found",
+            "404",
+            "legacy protocol required",
+        )
+    )
+
+
+def _extract_usage_pair(usage: Any) -> tuple[int, int]:
+    if usage is None:
+        return 0, 0
+    prompt_tokens = getattr(usage, "prompt_tokens", None)
+    completion_tokens = getattr(usage, "completion_tokens", None)
+    if prompt_tokens is not None or completion_tokens is not None:
+        return int(prompt_tokens or 0), int(completion_tokens or 0)
+    return int(getattr(usage, "input_tokens", 0) or 0), int(getattr(usage, "output_tokens", 0) or 0)
+
+
+def _response_finish_reason(response: Any) -> str | None:
+    incomplete = getattr(response, "incomplete_details", None)
+    if incomplete is None:
+        return None
+    reason = getattr(incomplete, "reason", None)
+    if reason:
+        return str(reason)
+    return "incomplete"
+
+
+def _extract_response_text(response: Any) -> str:
+    output_text = getattr(response, "output_text", None)
+    if output_text:
+        return output_text
+
+    parts: list[str] = []
+    for item in getattr(response, "output", []) or []:
+        if getattr(item, "type", None) != "message":
+            continue
+        for content in getattr(item, "content", []) or []:
+            text = getattr(content, "text", None)
+            if text:
+                parts.append(text)
+    return "".join(parts)
+
+
+def _extract_response_tool_calls(response: Any) -> list[ToolCall]:
+    tool_calls: list[ToolCall] = []
+    for item in getattr(response, "output", []) or []:
+        if getattr(item, "type", None) == "function_call":
+            tool_calls.append(
+                ToolCall(
+                    id=getattr(item, "call_id", None) or getattr(item, "id", ""),
+                    name=getattr(item, "name", ""),
+                    arguments=getattr(item, "arguments", "") or "{}",
+                )
+            )
+    return tool_calls
+
+
 class AIClient:
-    """
-    Multi-model AI client supporting role-based model routing.
-
-    All providers are accessed via the OpenAI-compatible SDK.
-    Per-request overrides (base_url, api_key, model) take precedence over env config.
-    """
-
     @property
     def settings(self):
-        """Fetch settings lazily to support hot-reload of .env values."""
         return get_settings()
 
     def _get_config(self, role: AgentRole = "default") -> dict:
-        """Get API configuration from env settings (openai_* fields)."""
-        base_url = self.settings.openai_base_url
-        if base_url.endswith("/chat/completions"):
-            base_url = base_url[: -len("/chat/completions")]
-        base_url = base_url.rstrip("/")
         return {
-            "base_url": base_url,
+            "base_url": _normalize_base_url(self.settings.openai_base_url),
             "api_key": self.settings.openai_api_key,
             "model": self.settings.openai_model,
         }
@@ -215,13 +280,46 @@ class AIClient:
         api_key: str | None = None,
         model: str | None = None,
     ) -> dict:
-        """Resolve LLM config: use per-request values if all 3 provided, else env fallback."""
         if base_url and api_key and model:
-            if base_url.endswith("/chat/completions"):
-                base_url = base_url[: -len("/chat/completions")]
-            base_url = base_url.rstrip("/")
-            return {"base_url": base_url, "api_key": api_key, "model": model}
+            return {"base_url": _normalize_base_url(base_url), "api_key": api_key, "model": model}
         return self._get_config()
+
+    async def _responses_generate(
+        self,
+        client: AsyncOpenAI,
+        *,
+        model: str,
+        prompt: str,
+        system_prompt: str,
+        max_tokens: int,
+        temperature: float,
+    ):
+        return await client.responses.create(
+            model=model,
+            instructions=system_prompt,
+            input=prompt,
+            max_output_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+    async def _responses_generate_stream(
+        self,
+        client: AsyncOpenAI,
+        *,
+        model: str,
+        prompt: str,
+        system_prompt: str,
+        max_tokens: int,
+        temperature: float,
+    ):
+        return await client.responses.create(
+            model=model,
+            instructions=system_prompt,
+            input=prompt,
+            max_output_tokens=max_tokens,
+            temperature=temperature,
+            stream=True,
+        )
 
     async def generate(
         self,
@@ -242,10 +340,40 @@ class AIClient:
         )
         ensure_ai_available_fresh_session(billing_source=usage_billing_source)
         config = self._resolve_config(base_url, api_key, model)
-        client = AsyncOpenAI(
-            base_url=config["base_url"],
-            api_key=config["api_key"],
-        )
+        client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
+
+        try:
+            response = await self._responses_generate(
+                client,
+                model=config["model"],
+                prompt=prompt,
+                system_prompt=system_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
+            if prompt_tokens or completion_tokens:
+                _record_usage(
+                    config["model"],
+                    prompt_tokens,
+                    completion_tokens,
+                    node_name=role,
+                    user_id=user_id,
+                    billing_source=usage_billing_source,
+                )
+            finish_reason = _response_finish_reason(response)
+            if finish_reason == "max_output_tokens":
+                logger.warning(
+                    "generate truncated (max_tokens=%s, finish_reason=%s)",
+                    max_tokens,
+                    finish_reason,
+                    extra={"base_url": config["base_url"], "model": config["model"]},
+                )
+            return _extract_response_text(response)
+        except Exception as exc:
+            if not _responses_unsupported(exc):
+                raise
+
         response = await client.chat.completions.create(
             model=config["model"],
             messages=[
@@ -256,9 +384,14 @@ class AIClient:
             temperature=temperature,
         )
         if response.usage:
-            _record_usage(config["model"], response.usage.prompt_tokens,
-                          response.usage.completion_tokens, node_name=role, user_id=user_id,
-                          billing_source=usage_billing_source)
+            _record_usage(
+                config["model"],
+                response.usage.prompt_tokens,
+                response.usage.completion_tokens,
+                node_name=role,
+                user_id=user_id,
+                billing_source=usage_billing_source,
+            )
         finish_reason = getattr(response.choices[0], "finish_reason", None)
         if finish_reason == "length":
             logger.warning(
@@ -282,17 +415,57 @@ class AIClient:
         billing_source_hint: str | None = None,
         user_id: int | None = None,
     ):
-        """Yield content chunks from streaming LLM response."""
         usage_billing_source = _resolve_billing_source(
             billing_source_hint,
             using_request_override=bool(base_url and api_key and model),
         )
         ensure_ai_available_fresh_session(billing_source=usage_billing_source)
         config = self._resolve_config(base_url, api_key, model)
-        client = AsyncOpenAI(
-            base_url=config["base_url"],
-            api_key=config["api_key"],
-        )
+        client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
+
+        try:
+            stream = await self._responses_generate_stream(
+                client,
+                model=config["model"],
+                prompt=prompt,
+                system_prompt=system_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            prompt_tokens = 0
+            completion_tokens = 0
+            finish_reason: str | None = None
+            async for event in stream:
+                event_type = getattr(event, "type", None)
+                if event_type == "response.output_text.delta":
+                    delta = getattr(event, "delta", None)
+                    if delta:
+                        yield delta
+                elif event_type == "response.completed":
+                    response = getattr(event, "response", None)
+                    prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
+                    finish_reason = _response_finish_reason(response)
+            if prompt_tokens or completion_tokens:
+                _record_usage(
+                    config["model"],
+                    prompt_tokens,
+                    completion_tokens,
+                    node_name=role,
+                    user_id=user_id,
+                    billing_source=usage_billing_source,
+                )
+            if finish_reason == "max_output_tokens":
+                logger.warning(
+                    "generate_stream truncated (max_tokens=%s, finish_reason=%s)",
+                    max_tokens,
+                    finish_reason,
+                    extra={"base_url": config["base_url"], "model": config["model"]},
+                )
+            return
+        except Exception as exc:
+            if not _responses_unsupported(exc):
+                raise
+
         request_kwargs = {
             "model": config["model"],
             "messages": [
@@ -304,11 +477,7 @@ class AIClient:
             "stream": True,
         }
         try:
-            # Provider-dependent; some OpenAI-compatible gateways 400 on unknown params.
-            stream = await client.chat.completions.create(
-                **request_kwargs,
-                stream_options={"include_usage": True},
-            )
+            stream = await client.chat.completions.create(**request_kwargs, stream_options={"include_usage": True})
         except Exception as exc:
             if not _stream_options_unsupported(exc):
                 raise
@@ -318,6 +487,7 @@ class AIClient:
                 extra={"base_url": config["base_url"], "model": config["model"]},
             )
             stream = await client.chat.completions.create(**request_kwargs)
+
         prompt_tokens: int | None = None
         completion_tokens: int | None = None
         finish_reason: str | None = None
@@ -364,20 +534,45 @@ class AIClient:
         user_id: int | None = None,
         tool_choice: str | None = None,
     ) -> ToolLLMResponse:
-        """Single-turn LLM call with tool definitions. Returns ToolLLMResponse.
-
-        Raises ToolCallUnsupportedError if the provider rejects the tools parameter.
-        """
         usage_billing_source = _resolve_billing_source(
             billing_source_hint,
             using_request_override=bool(base_url and api_key and model),
         )
         ensure_ai_available_fresh_session(billing_source=usage_billing_source)
         config = self._resolve_config(base_url, api_key, model)
-        client = AsyncOpenAI(
-            base_url=config["base_url"],
-            api_key=config["api_key"],
-        )
+        client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
+
+        try:
+            response = await client.responses.create(
+                model=config["model"],
+                input=messages,
+                tools=tools or None,
+                tool_choice=tool_choice or "auto",
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+            )
+            prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
+            if prompt_tokens or completion_tokens:
+                _record_usage(
+                    config["model"],
+                    prompt_tokens,
+                    completion_tokens,
+                    node_name=role,
+                    user_id=user_id,
+                    billing_source=usage_billing_source,
+                )
+            return ToolLLMResponse(
+                content=_extract_response_text(response),
+                tool_calls=_extract_response_tool_calls(response),
+                finish_reason=_response_finish_reason(response),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+        except Exception as exc:
+            if _tool_call_unsupported(exc):
+                raise ToolCallUnsupportedError(str(exc)) from exc
+            if not _responses_unsupported(exc):
+                raise
 
         request_kwargs: dict[str, Any] = {
             "model": config["model"],
@@ -414,11 +609,13 @@ class AIClient:
         tool_calls: list[ToolCall] = []
         if choice and choice.message.tool_calls:
             for tc in choice.message.tool_calls:
-                tool_calls.append(ToolCall(
-                    id=tc.id,
-                    name=tc.function.name,
-                    arguments=tc.function.arguments,
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=tc.id,
+                        name=tc.function.name,
+                        arguments=tc.function.arguments,
+                    )
+                )
 
         return ToolLLMResponse(
             content=content,
@@ -443,33 +640,82 @@ class AIClient:
         billing_source_hint: str | None = None,
         user_id: int | None = None,
     ) -> T:
-        """
-        Generate structured output via OpenAI-compatible JSON mode + Pydantic parsing.
-
-        Raises:
-            StructuredOutputParseError: If structured output cannot be parsed after retries
-            LLMUnavailableError: If the LLM request fails after retries
-        """
         usage_billing_source = _resolve_billing_source(
             billing_source_hint,
             using_request_override=bool(base_url and api_key and model),
         )
         ensure_ai_available_fresh_session(billing_source=usage_billing_source)
         config = self._resolve_config(base_url, api_key, model)
-        client = AsyncOpenAI(
-            base_url=config["base_url"],
-            api_key=config["api_key"],
-        )
+        client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
 
         schema_json = json.dumps(response_model.model_json_schema(), ensure_ascii=False)
         structured_system = (
             f"{system_prompt}\n\n"
-            f"You MUST respond with valid JSON matching this schema:\n{schema_json}"
+            f"You MUST respond with valid JSON matching this schema:\n{schema_json}\n"
+            "Return JSON only. No markdown fences."
         )
 
         last_request_error: Exception | None = None
         last_parse_error: Exception | None = None
         saw_response = False
+
+        for attempt in range(max_retries):
+            try:
+                response = await client.responses.create(
+                    model=config["model"],
+                    instructions=structured_system,
+                    input=prompt,
+                    max_output_tokens=max_tokens,
+                    temperature=temperature,
+                )
+                saw_response = True
+                prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
+                if prompt_tokens or completion_tokens:
+                    _record_usage(
+                        config["model"],
+                        prompt_tokens,
+                        completion_tokens,
+                        node_name=role,
+                        user_id=user_id,
+                        billing_source=usage_billing_source,
+                    )
+                raw = _extract_response_text(response) or ""
+                finish_reason = _response_finish_reason(response)
+                response_id = getattr(response, "id", None)
+                if finish_reason == "max_output_tokens":
+                    logger.warning(
+                        "generate_structured truncated (max_tokens=%s, finish_reason=%s, content_len=%s, response_id=%s)",
+                        max_tokens,
+                        finish_reason,
+                        len(raw),
+                        response_id,
+                        extra={"base_url": config["base_url"], "model": config["model"]},
+                    )
+                    raise StructuredOutputParseError(
+                        max_retries=1,
+                        last_error=ValueError(
+                            f"LLM response truncated (finish_reason=max_output_tokens, max_tokens={max_tokens}). Increase max_tokens or reduce input."
+                        ),
+                    )
+                return response_model.model_validate_json(raw)
+            except StructuredOutputParseError:
+                raise
+            except Exception as exc:
+                if not _responses_unsupported(exc):
+                    last_request_error = exc
+                    logger.warning(
+                        "generate_structured request/parse failed (attempt %s/%s)",
+                        attempt + 1,
+                        max_retries,
+                        exc_info=True,
+                        extra={"base_url": config["base_url"], "model": config["model"]},
+                    )
+                    try:
+                        response_model.model_validate_json(_extract_response_text(exc))
+                    except Exception:
+                        pass
+                    continue
+                break
 
         for attempt in range(max_retries):
             try:
@@ -508,7 +754,6 @@ class AIClient:
             finish_reason = response.choices[0].finish_reason
             response_id = getattr(response, "id", None)
 
-            # If truncated (length limit hit), retrying won't help.
             if finish_reason == "length":
                 logger.warning(
                     "generate_structured truncated (max_tokens=%s, finish_reason=%s, content_len=%s, response_id=%s)",
@@ -521,8 +766,7 @@ class AIClient:
                 raise StructuredOutputParseError(
                     max_retries=1,
                     last_error=ValueError(
-                        f"LLM response truncated (finish_reason=length, max_tokens={max_tokens}). "
-                        "Increase max_tokens or reduce input."
+                        f"LLM response truncated (finish_reason=length, max_tokens={max_tokens}). Increase max_tokens or reduce input."
                     ),
                 )
 
@@ -553,10 +797,4 @@ ai_client = AIClient()
 
 
 def get_client(role: AgentRole = "default") -> AIClient:
-    """
-    Get the AI client instance.
-
-    Note: The role parameter is stored for reference but must still be passed
-    to generate() and generate_structured() methods for model routing.
-    """
     return ai_client

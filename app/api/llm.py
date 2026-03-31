@@ -10,8 +10,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.core.auth import get_current_user_or_default
 from app.core.ai_client import (
+    _extract_response_text,
+    _extract_usage_pair,
+    _normalize_base_url,
     _record_usage,
     _resolve_billing_source,
+    _responses_unsupported,
     _stream_options_unsupported,
 )
 from app.core.llm_request import get_llm_config
@@ -28,6 +32,20 @@ def _probe_error_message(exc: Exception) -> str:
 
 
 async def _probe_stream_support(client: AsyncOpenAI, model: str) -> None:
+    try:
+        stream = await client.responses.create(
+            model=model,
+            input="Reply with exactly: ok",
+            max_output_tokens=4,
+            stream=True,
+        )
+        async for _event in stream:
+            pass
+        return
+    except Exception as exc:
+        if not _responses_unsupported(exc):
+            raise
+
     request_kwargs = {
         "model": model,
         "messages": [{"role": "user", "content": "Reply with exactly: ok"}],
@@ -49,13 +67,25 @@ async def _probe_stream_support(client: AsyncOpenAI, model: str) -> None:
 
 
 async def _probe_json_mode_support(client: AsyncOpenAI, model: str) -> None:
-    response = await client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": 'Return a JSON object: {"ok": true}'}],
-        max_tokens=32,
-        response_format={"type": "json_object"},
-    )
-    raw = response.choices[0].message.content or ""
+    try:
+        response = await client.responses.create(
+            model=model,
+            instructions='Return a JSON object: {"ok": true}. Return JSON only.',
+            input="respond now",
+            max_output_tokens=32,
+        )
+        raw = _extract_response_text(response)
+    except Exception as exc:
+        if not _responses_unsupported(exc):
+            raise
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": 'Return a JSON object: {"ok": true}'}],
+            max_tokens=32,
+            response_format={"type": "json_object"},
+        )
+        raw = response.choices[0].message.content or ""
+
     parsed = json.loads(raw)
     if not isinstance(parsed, dict):
         raise ValueError("JSON mode response is not an object")
@@ -83,7 +113,6 @@ async def test_llm_connection(
     _user=Depends(get_current_user_or_default),
     db: Session = Depends(get_db),
 ):
-    """Send a minimal completion request to validate LLM config from headers."""
     config = get_llm_config(request)
     if not config or not config.get("base_url") or not config.get("api_key") or not config.get("model"):
         raise HTTPException(status_code=400, detail="Missing LLM config headers (X-LLM-Base-Url, X-LLM-Api-Key, X-LLM-Model)")
@@ -99,13 +128,8 @@ async def test_llm_connection(
     )
     ensure_ai_available(db, billing_source=billing_source)
 
-    base_url = config["base_url"]
-    if base_url.endswith("/chat/completions"):
-        base_url = base_url[: -len("/chat/completions")]
-    base_url = base_url.rstrip("/")
-
     client = AsyncOpenAI(
-        base_url=base_url,
+        base_url=_normalize_base_url(config["base_url"]),
         api_key=config["api_key"],
         timeout=10.0,
     )
@@ -114,29 +138,41 @@ async def test_llm_connection(
     capabilities = {"basic": False, "stream": False, "json_mode": False}
     errors: dict[str, str] = {}
     try:
-        response = await client.chat.completions.create(
-            model=config["model"],
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=1,
-        )
-        capabilities["basic"] = True
-        usage = getattr(response, "usage", None)
-        if usage is not None:
+        try:
+            response = await client.responses.create(
+                model=config["model"],
+                input="hi",
+                max_output_tokens=1,
+            )
+            capabilities["basic"] = True
+            prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
+        except Exception as exc:
+            if not _responses_unsupported(exc):
+                raise
+            response = await client.chat.completions.create(
+                model=config["model"],
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
+            )
+            capabilities["basic"] = True
+            usage = getattr(response, "usage", None)
             try:
-                prompt_tokens = int(usage.prompt_tokens)
-                completion_tokens = int(usage.completion_tokens)
+                prompt_tokens = int(usage.prompt_tokens) if usage is not None else 0
+                completion_tokens = int(usage.completion_tokens) if usage is not None else 0
             except (TypeError, ValueError):
-                pass
-            else:
-                _record_usage(
-                    config["model"],
-                    prompt_tokens,
-                    completion_tokens,
-                    endpoint="/api/llm/test",
-                    node_name="llm_test",
-                    user_id=getattr(_user, "id", None),
-                    billing_source=billing_source,
-                )
+                prompt_tokens = 0
+                completion_tokens = 0
+
+        if prompt_tokens or completion_tokens:
+            _record_usage(
+                config["model"],
+                prompt_tokens,
+                completion_tokens,
+                endpoint="/api/llm/test",
+                node_name="llm_test",
+                user_id=getattr(_user, "id", None),
+                billing_source=billing_source,
+            )
         latency_ms = round((time.perf_counter() - start) * 1000)
     except Exception as e:
         errors["basic"] = _probe_error_message(e)
