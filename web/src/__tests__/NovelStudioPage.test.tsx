@@ -67,7 +67,11 @@ vi.mock('@/components/generation/DriftWarningPopover', () => ({
 }))
 
 vi.mock('@/components/studio/StudioAssistantPanel', () => ({
-  StudioAssistantPanel: () => <div data-testid="studio-assistant" />,
+  StudioAssistantPanel: () => (
+    <div data-testid="studio-assistant">
+      <div data-testid="novel-assistant-chat-panel">AI 对话区</div>
+    </div>
+  ),
 }))
 
 vi.mock('@/components/studio/panels/InjectionSummaryPanel', () => ({
@@ -145,6 +149,25 @@ vi.mock('@/services/api', () => ({
     listChaptersMeta: vi.fn(),
     getChapter: vi.fn(),
     listChapters: vi.fn(),
+  },
+  copilotApi: {
+    openSession: vi.fn().mockResolvedValue({
+      session_id: 'assistant-chat-session-1',
+      signature: 'assistant-chat-sig-1',
+      mode: 'research',
+      scope: 'whole_book',
+      context: null,
+      interaction_locale: 'zh',
+      display_title: '',
+      created: true,
+      created_at: new Date().toISOString(),
+    }),
+    listRuns: vi.fn().mockResolvedValue([]),
+    createRun: vi.fn(),
+    pollRun: vi.fn(),
+    pollLatestRun: vi.fn().mockResolvedValue(null),
+    applySuggestions: vi.fn(),
+    dismissSuggestions: vi.fn(),
   },
   ApiError: class ApiError extends Error {
     code?: string
@@ -578,5 +601,16 @@ describe('NovelStudioPage', () => {
     expect(screen.getByText('Workspace')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Atlas world model/i })).toBeInTheDocument()
     expect(screen.getByText('Chapters')).toBeInTheDocument()
+  })
+
+  it('shows the assistant chat inside the studio rail when no copilot drawer session is focused', async () => {
+    renderWithStudioShell('/novel/7?chapter=3')
+
+    await waitFor(() => {
+      expect(screen.getByTestId('studio-assistant')).toBeInTheDocument()
+    })
+
+    expect(screen.getByTestId('novel-assistant-chat-panel')).toBeInTheDocument()
+    expect(screen.queryByTestId('novel-copilot-drawer')).not.toBeInTheDocument()
   })
 })

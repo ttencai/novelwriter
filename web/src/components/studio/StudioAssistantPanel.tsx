@@ -1,4 +1,5 @@
 import { BookOpen, Bot, Sparkles } from 'lucide-react'
+import { NovelAssistantChatPanel } from '@/components/novel-chat/NovelAssistantChatPanel'
 import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { cn } from '@/lib/utils'
 import { WorldBuildPanel } from '@/components/world-model/shared/WorldBuildPanel'
@@ -70,6 +71,7 @@ export function StudioAssistantPanel({
       </div>
 
       <div className="nw-scrollbar-thin min-h-0 flex-1 overflow-y-auto pr-1">
+        <NovelAssistantChatPanel className="mb-3" />
         {contextualCopilotAction ? (
           <button
             type="button"
