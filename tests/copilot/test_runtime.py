@@ -328,6 +328,45 @@ class TestSessionOpenReuse:
         assert r2["context"]["tab"] == "systems"
         assert r2["context"]["stage"] is None
 
+    def test_entrypoint_splits_session_identity_for_same_whole_book_context(self, client, novel):
+        drawer = client.post(
+            f"/api/novels/{novel.id}/world/copilot/sessions",
+            json={
+                "mode": "research",
+                "scope": "whole_book",
+                "entrypoint": "copilot_drawer",
+            },
+        ).json()
+        chat = client.post(
+            f"/api/novels/{novel.id}/world/copilot/sessions",
+            json={
+                "mode": "research",
+                "scope": "whole_book",
+                "entrypoint": "assistant_chat",
+            },
+        ).json()
+        assert drawer["session_id"] != chat["session_id"]
+
+    def test_service_boundary_reuses_same_entrypoint_but_splits_different_entrypoints(self, db, novel):
+        from app.core.copilot import open_or_reuse_session
+
+        drawer, created = open_or_reuse_session(
+            db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "Drawer"
+        )
+        assert created is True
+
+        drawer_reused, created = open_or_reuse_session(
+            db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "Drawer 2"
+        )
+        assert created is False
+        assert drawer_reused.session_id == drawer.session_id
+
+        chat, created = open_or_reuse_session(
+            db, novel.id, 1, "research", "whole_book", None, "zh", "assistant_chat", "Chat"
+        )
+        assert created is True
+        assert chat.session_id != drawer.session_id
+
     def test_current_entity_scope_requires_entity_id(self, client, novel):
         resp = client.post(
             f"/api/novels/{novel.id}/world/copilot/sessions",
@@ -353,7 +392,7 @@ class TestSessionOpenReuse:
     def test_duplicate_signature_conflict_reuses_existing_session(self, db, novel, monkeypatch):
         from app.core.copilot import _load_session_by_signature, open_or_reuse_session
 
-        existing, created = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "初始标题")
+        existing, created = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "初始标题")
         assert created is True
 
         calls = {"count": 0}
@@ -371,7 +410,7 @@ class TestSessionOpenReuse:
 
         monkeypatch.setattr("app.core.copilot._load_session_by_signature", fake_load)
 
-        reused, created = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "更新标题")
+        reused, created = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "更新标题")
         assert created is False
         assert reused.session_id == existing.session_id
         assert reused.display_title == "更新标题"
@@ -1469,7 +1508,7 @@ class TestAdmissionControl:
 
     def test_one_active_run_per_session(self, db, novel):
         from app.core.copilot import CopilotError, create_run, open_or_reuse_session
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "")
         create_run(db, session, 1, "first")
         with pytest.raises(CopilotError) as exc_info:
             create_run(db, session, 1, "second")
@@ -1509,7 +1548,7 @@ class TestAdmissionControl:
         from datetime import datetime, timedelta, timezone
         from app.core.copilot import create_run, open_or_reuse_session
 
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "")
         stale_run = create_run(db, session, 1, "first")
         stale_run.lease_expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=60)
         db.commit()
@@ -1524,7 +1563,7 @@ class TestAdmissionControl:
     def test_db_constraint_translates_duplicate_active_run_conflict(self, db, novel, monkeypatch):
         from app.core.copilot import CopilotError, create_run, open_or_reuse_session
 
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "")
         create_run(db, session, 1, "first")
 
         monkeypatch.setattr("app.core.copilot._count_active_runs_in_session", lambda *_args, **_kwargs: 0)
@@ -1609,7 +1648,7 @@ class TestHostedQuotaBilling:
         novel.owner_id = hosted_user.id
         db.commit()
 
-        session, _ = open_or_reuse_session(db, novel.id, hosted_user.id, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, hosted_user.id, "research", "whole_book", None, "zh", "copilot_drawer", "")
         reservation_id = open_quota_reservation(db, hosted_user.id, count=1)
         run = create_run(db, session, hosted_user.id, "排队中的请求", quota_reservation_id=reservation_id)
         run.lease_expires_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=60)
@@ -1636,7 +1675,7 @@ class TestHostedQuotaBilling:
         novel.owner_id = hosted_user.id
         db.commit()
 
-        session, _ = open_or_reuse_session(db, novel.id, hosted_user.id, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, hosted_user.id, "research", "whole_book", None, "zh", "copilot_drawer", "")
         reservation_id = open_quota_reservation(db, hosted_user.id, count=1)
         run = create_run(db, session, hosted_user.id, "分析张三", quota_reservation_id=reservation_id)
 
@@ -1669,7 +1708,7 @@ class TestHostedQuotaBilling:
         novel.owner_id = hosted_user.id
         db.commit()
 
-        session, _ = open_or_reuse_session(db, novel.id, hosted_user.id, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, hosted_user.id, "research", "whole_book", None, "zh", "copilot_drawer", "")
         reservation_id = open_quota_reservation(db, hosted_user.id, count=1)
         run = create_run(db, session, hosted_user.id, "这次会失败", quota_reservation_id=reservation_id)
 
@@ -1739,7 +1778,7 @@ class TestPromptContracts:
 
         from app.core.copilot import create_run, execute_copilot_run, open_or_reuse_session
 
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "")
         run = create_run(
             db,
             session,
@@ -1768,6 +1807,35 @@ class TestPromptContracts:
         assert captured_prompts == [
             "[研究重点: 重点找出世界模型中尚未覆盖但章节反复提到的设定、组织或概念。]\n\n请盘点当前世界模型的缺口。",
         ]
+
+    @pytest.mark.asyncio
+    async def test_execute_copilot_run_assistant_chat_skips_tool_loop(self, db, novel, monkeypatch):
+        import app.database as db_mod
+        import app.core.copilot as copilot_mod
+
+        from app.core.copilot import create_run, execute_copilot_run, open_or_reuse_session
+
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "assistant_chat", "AI 对话")
+        run = create_run(db, session, 1, "直接回答，不要研究过程")
+
+        async def broken_tool_loop(*_args, **_kwargs):
+            raise AssertionError("assistant_chat should not enter tool loop")
+
+        async def fake_run_one_shot(*_args, **_kwargs):
+            return {"answer": "直接回答", "suggestions": []}, []
+
+        monkeypatch.setattr(db_mod, "SessionLocal", TestingSessionLocal)
+        monkeypatch.setattr(copilot_mod, "gather_evidence", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(copilot_mod, "_run_tool_loop", broken_tool_loop)
+        monkeypatch.setattr(copilot_mod, "_run_one_shot", fake_run_one_shot)
+        monkeypatch.setattr(copilot_mod, "compile_suggestions", lambda *_args, **_kwargs: [])
+
+        await execute_copilot_run(run.run_id, novel.id, 1, llm_config={"billing_source_hint": "selfhost"})
+
+        db.expire_all()
+        run = db.query(CopilotRun).filter(CopilotRun.run_id == run.run_id).one()
+        assert run.status == "completed"
+        assert run.answer == "直接回答"
 
     @pytest.mark.asyncio
     async def test_execute_copilot_run_uses_run_context_snapshot_after_session_retarget(self, db, novel, entities, monkeypatch):
@@ -2385,7 +2453,7 @@ class TestAgentLoop:
     def mock_setup(self, db, novel, entities, chapters):
         """Set up session and run for agent loop tests."""
         from app.core.copilot import open_or_reuse_session, create_run
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "")
         run = create_run(db, session, 1, "分析张三")
         session_data = {
             "mode": session.mode, "scope": session.scope,
@@ -2640,7 +2708,7 @@ class TestDegradation:
     @pytest.fixture
     def mock_session_and_run(self, db, novel, entities, chapters):
         from app.core.copilot import open_or_reuse_session, create_run
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "")
         run = create_run(db, session, 1, "测试降级")
         return session, run
 
@@ -2686,7 +2754,7 @@ class TestDegradation:
         from app.core.ai_client import ToolCallUnsupportedError
         from app.core.copilot import create_run, execute_copilot_run, open_or_reuse_session
 
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "en", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "en", "copilot_drawer", "")
         run = create_run(db, session, 1, "Summarize the world")
 
         async def mock_tool_loop(*args, **kwargs):
@@ -2909,13 +2977,13 @@ class TestCopilotAdmissionControl:
         os.environ["COPILOT_MAX_RUNS_GLOBAL"] = "1"
         try:
             reload_settings()
-            s1, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "g1")
+            s1, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "g1")
             create_run(db, s1, 1, "run 1")
             # Second run from a different user should be blocked by global limit
             user2 = User(id=2, username="user2", hashed_password="x", role="user", is_active=True, generation_quota=999)
             db.add(user2)
             db.commit()
-            s2, _ = open_or_reuse_session(db, novel.id, 2, "research", "whole_book", None, "zh", "g2")
+            s2, _ = open_or_reuse_session(db, novel.id, 2, "research", "whole_book", None, "zh", "copilot_drawer", "g2")
             with pytest.raises(CopilotError) as exc_info:
                 create_run(db, s2, 2, "run 2")
             assert exc_info.value.code == "too_many_global_runs"
@@ -3213,7 +3281,7 @@ class TestWorkspaceResume:
         """Fresh runs must not silently inherit interrupted workspace."""
         from app.core.copilot import open_or_reuse_session, create_run, EvidencePack, Workspace
 
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "")
 
         # Create first run, simulate it getting interrupted with workspace
         run1 = create_run(db, session, 1, "分析全书")
@@ -3243,7 +3311,7 @@ class TestWorkspaceResume:
         """Explicit resume requests may inherit interrupted workspace."""
         from app.core.copilot import open_or_reuse_session, create_run, EvidencePack, Workspace
 
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "")
 
         run1 = create_run(db, session, 1, "分析全书")
         ws = Workspace()
@@ -3274,7 +3342,7 @@ class TestWorkspaceResume:
     def test_explicit_resume_requires_matching_prompt(self, db, novel, entities, chapters):
         from app.core.copilot import CopilotError, open_or_reuse_session, create_run, Workspace
 
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "")
 
         run1 = create_run(db, session, 1, "分析全书")
         run1.status = "interrupted"
@@ -3289,7 +3357,7 @@ class TestWorkspaceResume:
         """Only interrupted runs donate their workspace, not completed ones."""
         from app.core.copilot import open_or_reuse_session, create_run, Workspace
 
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "")
 
         run1 = create_run(db, session, 1, "分析全书")
         run1.status = "completed"
@@ -3305,7 +3373,7 @@ class TestWorkspaceResume:
 
         from app.core.copilot import EvidencePack, Workspace, create_run, execute_copilot_run, open_or_reuse_session
 
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "")
 
         run1 = create_run(db, session, 1, "先总结张三")
         ws = Workspace()
@@ -3365,7 +3433,7 @@ class TestWorkspaceResume:
 
         from app.core.copilot import EvidencePack, Workspace, create_run, execute_copilot_run, open_or_reuse_session
 
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "")
 
         run1 = create_run(db, session, 1, "旧问题")
         ws = Workspace()
@@ -3428,7 +3496,7 @@ class TestLeaseRecovery:
             open_or_reuse_session,
         )
 
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "")
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "")
         run = create_run(db, session, 1, "分析全书")
         interrupted_message = get_copilot_text(CopilotTextKey.RUN_INTERRUPTED, locale="zh")
 

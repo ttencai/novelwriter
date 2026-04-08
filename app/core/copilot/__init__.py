@@ -491,6 +491,7 @@ def build_session_signature(
     scope: str,
     context: dict | None,
     interaction_locale: str,
+    entrypoint: str,
 ) -> str:
     """Deterministic signature for session dedup."""
     normalized_context = normalize_session_identity_context(mode, scope, context)
@@ -502,10 +503,23 @@ def build_session_signature(
             "entity_id": (normalized_context or {}).get("entity_id"),
             "tab": (normalized_context or {}).get("tab"),
             "locale": normalized_interaction_locale,
+            "entrypoint": entrypoint,
         },
         sort_keys=True,
     )
     return hashlib.sha256(payload.encode()).hexdigest()[:32]
+
+
+def _is_assistant_chat_session(session: CopilotSession | None) -> bool:
+    if session is None:
+        return False
+    return session.signature == build_session_signature(
+        session.mode,
+        session.scope,
+        session.context_json,
+        session.interaction_locale,
+        "assistant_chat",
+    )
 
 
 def open_or_reuse_session(
@@ -516,12 +530,13 @@ def open_or_reuse_session(
     scope: str,
     context: dict | None,
     interaction_locale: str,
+    entrypoint: str,
     display_title: str,
 ) -> tuple[CopilotSession, bool]:
     """Return (session, created).  Reuses existing unexpired session if signature matches."""
     context = canonicalize_session_context(context)
     normalized_interaction_locale = normalize_copilot_interaction_locale(interaction_locale)
-    sig = build_session_signature(mode, scope, context, normalized_interaction_locale)
+    sig = build_session_signature(mode, scope, context, normalized_interaction_locale, entrypoint)
 
     existing = _load_session_by_signature(
         db,
@@ -912,16 +927,25 @@ async def execute_copilot_run(
         workspace: Workspace | None = None
         execution_mode = "tool_loop"
         degraded_reason: str | None = None
+        assistant_chat_session = _is_assistant_chat_session(session)
 
         try:
-            parsed, final_evidence, workspace = await _run_tool_loop(
-                db_factory, novel_id, session_data, prompt, llm_config, user_id,
-                snapshot, scenario, evidence, turn_intent, run_id=run_id,
-                worker_id=worker_id,
-                inherited_workspace=inherited_workspace,
-                prior_messages=follow_up_messages,
-                workspace_seed=follow_up_workspace_seed,
-            )
+            if assistant_chat_session:
+                execution_mode = "one_shot_assistant_chat"
+                degraded_reason = "assistant_chat_disabled_tool_loop"
+                parsed, final_evidence = await _run_one_shot(
+                    snapshot, evidence, scenario, session_data, turn_intent, prompt, llm_config, user_id,
+                    run_id=run_id, worker_id=worker_id, db_factory=db_factory,
+                )
+            else:
+                parsed, final_evidence, workspace = await _run_tool_loop(
+                    db_factory, novel_id, session_data, prompt, llm_config, user_id,
+                    snapshot, scenario, evidence, turn_intent, run_id=run_id,
+                    worker_id=worker_id,
+                    inherited_workspace=inherited_workspace,
+                    prior_messages=follow_up_messages,
+                    workspace_seed=follow_up_workspace_seed,
+                )
         except ToolCallUnsupportedError:
             logger.info("Tool calls unsupported, degrading to one-shot")
             execution_mode = "one_shot_unsupported"
