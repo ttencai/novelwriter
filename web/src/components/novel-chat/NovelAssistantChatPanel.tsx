@@ -8,7 +8,6 @@ import { getCopilotWorkbenchMeta } from '@/components/novel-copilot/novelCopilot
 import { NovelCopilotComposer } from '@/components/novel-copilot/NovelCopilotComposer'
 import { NovelCopilotModelPicker } from '@/components/novel-copilot/NovelCopilotModelPicker'
 import { NovelCopilotQuickActions } from '@/components/novel-copilot/NovelCopilotQuickActions'
-import { NovelCopilotResearchProcess } from '@/components/novel-copilot/NovelCopilotResearchProcess'
 import { NovelCopilotSuggestionCard } from '@/components/novel-copilot/NovelCopilotSuggestionCard'
 import { NovelCopilotSessionStrip } from '@/components/novel-copilot/NovelCopilotSessionStrip'
 import { AiStatusPill } from '@/components/novel-copilot/AiStatusPill'
@@ -19,7 +18,6 @@ import {
   copilotPanelStrongClassName,
   copilotPillInteractiveClassName,
 } from '@/components/novel-copilot/novelCopilotChrome'
-import type { CopilotEvidence } from '@/types/copilot'
 import { api } from '@/services/api'
 import { getLlmConfig, initializeLlmConfig, setLlmConfig } from '@/lib/llmConfigStore'
 import { useToast } from '@/components/world-model/shared/useToast'
@@ -28,19 +26,6 @@ const sectionPanelClassName = `${copilotPanelClassName} rounded-[24px] p-4`
 const dashedPanelClassName =
   `${copilotPanelMutedClassName} rounded-[22px] border-dashed px-4 py-4 text-center text-sm text-muted-foreground`
 const assistantChatPanelHeightClassName = 'h-full max-h-[min(68vh,720px)]'
-
-function formatEvidencePrompt(evidence: CopilotEvidence, locale: string) {
-  const chapterNumber = typeof evidence.source_ref?.chapter_number === 'number'
-    ? evidence.source_ref.chapter_number
-    : null
-  const chapterLabel = chapterNumber
-    ? (locale === 'zh' ? `第${chapterNumber}章` : `Chapter ${chapterNumber}`)
-    : evidence.title
-  if (locale === 'zh') {
-    return `请基于这段章节引用继续分析：\n【${chapterLabel}】${evidence.title}\n「${evidence.excerpt}」\n\n我想确认这段引用说明了什么？它对当前设定/关系/剧情有什么影响？`
-  }
-  return `Please continue the analysis based on this chapter quote:\n[${chapterLabel}] ${evidence.title}\n"${evidence.excerpt}"\n\nWhat does this quote imply, and how does it affect the current setting, relationship, or plot?`
-}
 
 export function NovelAssistantChatPanel({
   className,
@@ -65,7 +50,6 @@ export function NovelAssistantChatPanel({
   const { toast } = useToast()
   const [retryingRunId, setRetryingRunId] = useState<string | null>(null)
   const [composerValue, setComposerValue] = useState('')
-  const [composerFocusSignal, setComposerFocusSignal] = useState(0)
   const [modelOptions, setModelOptions] = useState<string[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
   const [selectedModel, setSelectedModel] = useState(() => getLlmConfig().model)
@@ -131,11 +115,6 @@ export function NovelAssistantChatPanel({
     removeSession(session.sessionId)
     setComposerValue('')
   }, [removeSession, session])
-
-  const handleAskAboutEvidence = useCallback((evidence: CopilotEvidence) => {
-    setComposerValue(formatEvidencePrompt(evidence, locale))
-    setComposerFocusSignal((current) => current + 1)
-  }, [locale])
 
   const handleSubmit = useCallback((prompt: string) => {
     if (!session) return
@@ -320,14 +299,6 @@ export function NovelAssistantChatPanel({
                     </div>
                   ) : null}
 
-                  {(run.trace?.length > 0 || run.evidence?.length > 0) ? (
-                    <NovelCopilotResearchProcess
-                      trace={run.trace}
-                      evidence={run.evidence}
-                      onAskAboutEvidence={handleAskAboutEvidence}
-                    />
-                  ) : null}
-
                   {run.status === 'completed' && pendingSuggestions.length > 0 ? (
                     <section className={sectionPanelClassName}>
                       <div className="mb-3 flex items-center justify-between gap-3 px-1">
@@ -397,7 +368,7 @@ export function NovelAssistantChatPanel({
           placeholder={workbenchMeta.composerPlaceholder}
           value={composerValue}
           onValueChange={setComposerValue}
-          focusSignal={composerFocusSignal}
+          focusSignal={0}
         />
       </div>
     </section>
