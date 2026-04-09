@@ -297,8 +297,17 @@ describe('api service', () => {
     const result = await copilotApi.openSession(1, {
       mode: 'current_entity',
       scope: 'current_entity',
+      entrypoint: 'copilot_drawer',
       context: { entity_id: 101, surface: 'atlas', tab: 'entities' },
     })
+
+    const init = (fetch as unknown as { mock: { calls: Array<[string, RequestInit]> } }).mock.calls[0][1]
+    expect(init.body).toBe(JSON.stringify({
+      mode: 'current_entity',
+      scope: 'current_entity',
+      entrypoint: 'copilot_drawer',
+      context: { entity_id: 101, surface: 'atlas', tab: 'entities' },
+    }))
 
     expect(result.context).toEqual({
       entity_id: 101,

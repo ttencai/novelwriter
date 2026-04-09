@@ -3,6 +3,7 @@ import {
   buildCopilotSessionSignature,
   normalizeCopilotInteractionLocale,
   type CopilotPrefill,
+  type CopilotSessionEntrypoint,
   type OpenNovelCopilotOptions,
   type NovelCopilotSession,
 } from '@/types/copilot'
@@ -36,6 +37,8 @@ function buildOpenSessionRequest(session: NovelCopilotSession) {
     scope: session.prefill.scope,
     context: session.prefill.context,
     interaction_locale: session.interactionLocale,
+    entrypoint: session.entrypoint,
+    session_key: session.sessionKey ?? undefined,
     display_title: session.displayTitle,
   }
 }
@@ -50,11 +53,13 @@ function buildOpenSessionRequestKey(session: NovelCopilotSession) {
 interface UseNovelCopilotSessionsStateParams {
   novelId: number | null
   interactionLocale: string
+  entrypoint: CopilotSessionEntrypoint
 }
 
 export function useNovelCopilotSessionsState({
   novelId,
   interactionLocale,
+  entrypoint,
 }: UseNovelCopilotSessionsStateParams): NovelCopilotSessionsOnlyState {
   const [isOpen, setIsOpen] = useState(false)
   const [sessions, setSessions] = useState<NovelCopilotSession[]>([])
@@ -144,7 +149,11 @@ export function useNovelCopilotSessionsState({
     if (novelId == null) return ''
 
     const currentSessions = sessionsRef.current
-    const signature = buildCopilotSessionSignature(prefill, novelId, normalizedInteractionLocale)
+    const sessionKey = options?.sessionKey?.trim() || null
+    const signature = buildCopilotSessionSignature(prefill, novelId, normalizedInteractionLocale, {
+      entrypoint,
+      sessionKey,
+    })
     const displayTitle = options?.displayTitle?.trim() || getDefaultCopilotSessionTitle(prefill)
     const existing = currentSessions.find((session) => session.signature === signature)
 
@@ -177,10 +186,12 @@ export function useNovelCopilotSessionsState({
     const nextSession: NovelCopilotSession = {
       sessionId: localId,
       signature,
+      sessionKey,
       prefill,
       displayTitle,
       novelId,
       interactionLocale: normalizedInteractionLocale,
+      entrypoint,
       backendSessionId: null,
     }
 
@@ -213,10 +224,7 @@ export function useNovelCopilotSessionsState({
         nextSessions[0] ??
         null
 
-      if (!fallback) {
-        setIsOpen(false)
-        return null
-      }
+      if (!fallback) return null
 
       return fallback.sessionId
     })

@@ -30,11 +30,12 @@ export function setLlmConfig(value: Partial<LlmConfig>): LlmConfig {
 }
 
 export function initializeLlmConfig(value: Partial<LlmConfig>): LlmConfig {
-  const hasUserValue = Boolean(currentConfig.baseUrl || currentConfig.apiKey || currentConfig.model)
-  if (hasUserValue) {
-    return getLlmConfig()
-  }
-  currentConfig = normalize({ ...EMPTY_CONFIG, ...value })
+  const defaults = normalize({ ...EMPTY_CONFIG, ...value })
+  currentConfig = normalize({
+    baseUrl: currentConfig.baseUrl || defaults.baseUrl,
+    apiKey: currentConfig.apiKey || defaults.apiKey,
+    model: currentConfig.model || defaults.model,
+  })
   return getLlmConfig()
 }
 

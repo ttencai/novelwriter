@@ -270,7 +270,7 @@ export function NovelAtlasPage() {
                   onSelectEntity={setSelectedEntity}
                   bottomSlot={(
                     <>
-                      <WorldBuildPanel novelId={nid} />
+                      <WorldBuildPanel novelId={nid} showAssistantChat={false} />
                       <DraftReviewSummaryCard novelId={nid} onOpen={openDraftReview} />
                     </>
                   )}
@@ -290,7 +290,7 @@ export function NovelAtlasPage() {
                   onSelectEntity={setSelectedEntity}
                   bottomSlot={
                     <>
-                      <WorldBuildPanel novelId={nid} />
+                      <WorldBuildPanel novelId={nid} showAssistantChat={false} />
                       <RelationshipSidebarPanel
                         novelId={nid}
                         selectedEntityId={effectiveSelectedEntityId}

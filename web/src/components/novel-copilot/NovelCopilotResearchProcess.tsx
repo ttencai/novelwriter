@@ -145,9 +145,11 @@ function buildProcessSummary(toolCount: number, evidenceCount: number, hasRunnin
 export function NovelCopilotResearchProcess({
   trace,
   evidence,
+  onAskAboutEvidence,
 }: {
   trace: CopilotTraceStep[]
   evidence: CopilotEvidence[]
+  onAskAboutEvidence?: (evidence: CopilotEvidence) => void
 }) {
   const { locale, t } = useUiLocale()
   const toolModeStep = trace.find((step) => step.kind === 'tool_mode') ?? null
@@ -343,6 +345,17 @@ export function NovelCopilotResearchProcess({
                       {selectedEvidence.excerpt}
                     </div>
                   </div>
+                  {onAskAboutEvidence ? (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => onAskAboutEvidence(selectedEvidence)}
+                        className={cn('inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-medium text-foreground/82', copilotPillInteractiveClassName)}
+                      >
+                        {t('copilot.research.askWithEvidence')}
+                      </button>
+                    </div>
+                  ) : null}
                 </>
               ) : null}
 

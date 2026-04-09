@@ -7,7 +7,6 @@ import { useNovelAssistantChat } from './NovelAssistantChatContext'
 import { getCopilotWorkbenchMeta } from '@/components/novel-copilot/novelCopilotWorkbench'
 import { NovelCopilotComposer } from '@/components/novel-copilot/NovelCopilotComposer'
 import { NovelCopilotModelPicker } from '@/components/novel-copilot/NovelCopilotModelPicker'
-import { NovelCopilotQuickActions } from '@/components/novel-copilot/NovelCopilotQuickActions'
 import { NovelCopilotSuggestionCard } from '@/components/novel-copilot/NovelCopilotSuggestionCard'
 import { NovelCopilotSessionStrip } from '@/components/novel-copilot/NovelCopilotSessionStrip'
 import { AiStatusPill } from '@/components/novel-copilot/AiStatusPill'
@@ -27,6 +26,10 @@ const dashedPanelClassName =
   `${copilotPanelMutedClassName} rounded-[22px] border-dashed px-4 py-4 text-center text-sm text-muted-foreground`
 const assistantChatPanelHeightClassName = 'h-full max-h-[min(68vh,720px)]'
 
+function buildAssistantChatSessionKey() {
+  return `nac_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
 export function NovelAssistantChatPanel({
   className,
 }: {
@@ -37,6 +40,7 @@ export function NovelAssistantChatPanel({
     focusedSessionId,
     focusSession,
     removeSession,
+    openDrawer,
     focusedSession,
     activeRun,
     getSessionRun,
@@ -122,26 +126,20 @@ export function NovelAssistantChatPanel({
     void submitPrompt(session.sessionId, prompt, session.prefill.scope, session.prefill.context)
   }, [persistSelectedModel, selectedModel, session, submitPrompt])
 
+  const handleCreateSession = useCallback(() => {
+    openDrawer(
+      { mode: 'research', scope: 'whole_book' },
+      {
+        displayTitle: t('copilot.chat.sessionTitle'),
+        sessionKey: buildAssistantChatSessionKey(),
+      },
+    )
+  }, [openDrawer, t])
+
   const workbenchMeta = useMemo(() => {
     if (!session) return null
     return getCopilotWorkbenchMeta(session.prefill, session.displayTitle, locale)
   }, [locale, session])
-
-  const quickActionPrompts = useMemo(() => Object.fromEntries(
-    (workbenchMeta?.quickActions ?? []).map((action) => [action.id, action.prompt]),
-  ), [workbenchMeta])
-
-  const handleAction = useCallback((action: string) => {
-    if (!session) return
-    persistSelectedModel(selectedModel)
-    void submitPrompt(
-      session.sessionId,
-      quickActionPrompts[action] ?? t('copilot.drawer.fallbackPrompt'),
-      session.prefill.scope,
-      session.prefill.context,
-      action,
-    )
-  }, [persistSelectedModel, quickActionPrompts, selectedModel, session, submitPrompt, t])
 
   const sessionRuns = session ? getSessionRuns(session.sessionId) : []
   const focusedStatus =
@@ -210,6 +208,7 @@ export function NovelAssistantChatPanel({
           getSessionStatus={(sessionId) => getSessionRun(sessionId)?.status ?? null}
           onFocusSession={focusSession}
           onRemoveSession={removeSession}
+          onCreateSession={handleCreateSession}
         />
       ) : null}
 
@@ -219,22 +218,15 @@ export function NovelAssistantChatPanel({
             <div className={cn('relative overflow-hidden rounded-[24px] px-4 py-4', copilotPanelStrongClassName)}>
               <div className="pointer-events-none absolute inset-x-0 top-0 h-14 bg-[radial-gradient(circle_at_top_left,var(--nw-copilot-glow-4),transparent_62%)] [mix-blend-mode:var(--nw-copilot-glow-blend)] opacity-[var(--nw-copilot-glow-op)]" />
               <div className="pointer-events-none absolute inset-y-0 right-0 w-24 bg-[radial-gradient(circle_at_right,var(--nw-copilot-glow-2),transparent_68%)] [mix-blend-mode:var(--nw-copilot-glow-blend)] opacity-[calc(var(--nw-copilot-glow-op)*0.8)]" />
-              <div className="relative flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/70">
-                    {workbenchMeta.introEyebrow}
-                  </div>
-                  <div className="mt-1.5 text-sm font-medium text-foreground/90">
-                    {workbenchMeta.introTitle}
-                  </div>
+              <div className="relative space-y-2">
+                <div className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/70">
+                  {t('copilot.chat.badge')}
+                </div>
+                <div className="text-sm font-medium text-foreground/90">
+                  {t('copilot.chat.emptyHint')}
                 </div>
               </div>
             </div>
-            <NovelCopilotQuickActions
-              actions={workbenchMeta.quickActions}
-              onAction={handleAction}
-              disabled={isFocusedSessionBusy}
-            />
           </div>
         ) : (
           <div className="animate-in flex flex-col justify-end space-y-4 fade-in slide-in-from-bottom-2 duration-500">
@@ -293,7 +285,7 @@ export function NovelAssistantChatPanel({
                   {run.status === 'completed' && run.answer ? (
                     <div className={cn(copilotPanelClassName, 'rounded-[22px] rounded-tl-md px-4 py-3')}>
                       <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/70">
-                        {t('copilot.drawer.analysisResult')}
+                        {t('copilot.chat.badge')}
                       </div>
                       <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">{run.answer}</div>
                     </div>

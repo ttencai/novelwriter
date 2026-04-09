@@ -6,6 +6,7 @@ import {
 } from 'react'
 import { useLocation } from 'react-router-dom'
 import { NovelCopilotProvider } from '@/components/novel-copilot/NovelCopilotProvider'
+import { NovelAssistantChatProvider } from '@/components/novel-chat/NovelAssistantChatProvider'
 import { useUiLocale } from '@/contexts/UiLocaleContext'
 import {
   parseNovelShellRouteState,
@@ -45,7 +46,14 @@ export function NovelShellProvider({ children }: { children: ReactNode }) {
         novelId={routeState.novelId}
         interactionLocale={locale}
       >
-        {children}
+        <NovelAssistantChatProvider
+          key={`assistant-chat:${routeState.novelId ?? 'none'}:${locale}`}
+          novelId={routeState.novelId}
+          interactionLocale={locale}
+          routeState={routeState}
+        >
+          {children}
+        </NovelAssistantChatProvider>
       </NovelCopilotProvider>
     </NovelShellContext.Provider>
   )

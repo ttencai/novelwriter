@@ -19,6 +19,7 @@ export type CopilotContextStage =
 export type CopilotTargetTab = 'entities' | 'relationships' | 'systems' | 'review'
 export type CopilotReviewKind = 'entities' | 'relationships' | 'systems'
 export const DEFAULT_COPILOT_INTERACTION_LOCALE = DEFAULT_UI_LOCALE
+export type CopilotSessionEntrypoint = 'copilot_drawer' | 'assistant_chat'
 
 interface CopilotUiContextData {
   surface?: CopilotContextSurface
@@ -87,6 +88,8 @@ export interface CopilotSessionIdentityContext {
 export interface NovelCopilotSession {
   sessionId: string
   signature: string
+  sessionKey?: string | null
+  entrypoint: CopilotSessionEntrypoint
   prefill: CopilotPrefill
   displayTitle: string
   novelId: number
@@ -96,6 +99,12 @@ export interface NovelCopilotSession {
 
 export interface OpenNovelCopilotOptions {
   displayTitle?: string
+  sessionKey?: string
+}
+
+export interface UseNovelCopilotSessionIdentityOptions {
+  entrypoint: CopilotSessionEntrypoint
+  sessionKey?: string | null
 }
 
 export type CopilotRunStatus = 'idle' | 'queued' | 'running' | 'completed' | 'error' | 'interrupted'
@@ -212,10 +221,13 @@ export function buildCopilotSessionSignature(
   prefill: CopilotPrefill,
   novelId: number,
   interactionLocale: string,
+  options: UseNovelCopilotSessionIdentityOptions,
 ) {
   const context = normalizeCopilotSessionContext(prefill)
   return JSON.stringify({
     novel_id: novelId,
+    entrypoint: options.entrypoint,
+    session_key: options.sessionKey ?? null,
     interaction_locale: normalizeCopilotInteractionLocale(interactionLocale),
     mode: prefill.mode,
     scope: prefill.scope,

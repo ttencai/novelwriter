@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { NovelShell } from '@/components/novel-shell/NovelShell'
+import { copilotApi } from '@/services/api'
 import { useNovelShell } from '@/components/novel-shell/NovelShellContext'
 import { useNovelCopilot } from '@/components/novel-copilot/NovelCopilotContext'
 import { NovelCopilotDrawer } from '@/components/novel-copilot/NovelCopilotDrawer'
@@ -53,6 +54,8 @@ vi.mock('@/services/api', async (importOriginal) => {
     },
   }
 })
+
+const mockOpenSession = copilotApi.openSession as ReturnType<typeof vi.fn>
 
 const mockUseWorldEntities = vi.fn()
 const mockUseWorldRelationships = vi.fn()
@@ -156,6 +159,12 @@ describe('NovelShell', () => {
     expect(screen.getByTestId('drawer-width')).toHaveTextContent('360')
 
     await user.click(screen.getByRole('button', { name: '打开工作台' }))
+    await waitFor(() => {
+      expect(mockOpenSession).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({ entrypoint: 'copilot_drawer' }),
+      )
+    })
     await user.click(screen.getByRole('button', { name: '调整宽度' }))
     await user.click(screen.getByRole('button', { name: '跳转' }))
 

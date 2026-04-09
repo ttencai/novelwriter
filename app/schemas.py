@@ -150,8 +150,8 @@ class ContinueRequest(BaseModel):
     def _validate_target_chars(self):
         if self.target_chars is not None and self.target_chars not in self.ALLOWED_TARGET_CHARS:
             raise ValueError(f"target_chars must be one of {sorted(self.ALLOWED_TARGET_CHARS)}")
-        if self.context_chapters is not None and self.context_chapters > MAX_CONTEXT_CHAPTERS:
-            self.context_chapters = MAX_CONTEXT_CHAPTERS
+        if self.context_chapters is not None and self.context_chapters < 1:
+            self.context_chapters = 1
         return self
 
 
@@ -862,6 +862,7 @@ CopilotContextStage = Literal[
     "system",
     "review",
 ]
+CopilotSessionEntrypoint = Literal["copilot_drawer", "assistant_chat"]
 
 
 class CopilotContextData(BaseModel):
@@ -893,6 +894,8 @@ class CopilotSessionOpenRequest(BaseModel):
     scope: CopilotScope
     context: Optional[CopilotContextData] = None
     interaction_locale: str = Field(default="zh", max_length=10)
+    entrypoint: CopilotSessionEntrypoint = "copilot_drawer"
+    session_key: str = Field(default="", max_length=64)
     display_title: str = Field(default="", max_length=255)
 
     @field_validator("interaction_locale", mode="before")

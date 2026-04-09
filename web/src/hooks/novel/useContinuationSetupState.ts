@@ -17,12 +17,11 @@ type LengthOption = {
 
 export const LENGTH_OPTIONS: LengthOption[] = [
   { label: '2000', value: '2000', disabled: false },
-  { label: '3000', value: '3000', disabled: false },
   { label: '4000', value: '4000', disabled: false },
+  { label: '6000', value: '6000', disabled: false },
 ]
 
 const MIN_CONTEXT_CHAPTERS = 1
-const MAX_CONTEXT_CHAPTERS = 5
 const DEFAULT_CONTEXT_CHAPTERS = 5
 
 const DEMO_NOVEL_TITLE = '西游记'
@@ -37,7 +36,9 @@ const DEMO_DEFAULT_INSTRUCTION =
 export function resolveTargetChars(selected: string): number {
   const opt = LENGTH_OPTIONS.find(o => o.value === selected)
   if (opt) return parseInt(opt.value, 10)
-  return 3000
+  const parsed = parseInt(selected, 10)
+  if (!Number.isNaN(parsed) && parsed > 0) return parsed
+  return 4000
 }
 
 function clampInt(raw: string, min: number, max: number): number | undefined {
@@ -62,7 +63,7 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
   const { user } = useAuth()
 
   const [instruction, setInstruction] = useState('')
-  const [selectedLength, setSelectedLength] = useState('3000')
+  const [selectedLength, setSelectedLength] = useState('4000')
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [contextChapters, setContextChapters] = useState(String(DEFAULT_CONTEXT_CHAPTERS))
   const [numVersions, setNumVersions] = useState('1')
@@ -77,7 +78,7 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
       if (p.num_versions != null) setNumVersions(String(p.num_versions))
       if (p.temperature != null) setTemperature(String(p.temperature))
       if (p.context_chapters != null) {
-        const next = clampInt(String(p.context_chapters), MIN_CONTEXT_CHAPTERS, MAX_CONTEXT_CHAPTERS)
+        const next = clampInt(String(p.context_chapters), MIN_CONTEXT_CHAPTERS, Number.MAX_SAFE_INTEGER)
         setContextChapters(String(next ?? DEFAULT_CONTEXT_CHAPTERS))
       }
       if (p.target_chars != null) {
@@ -111,7 +112,7 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
     if (!Number.isNaN(nv)) prefs.num_versions = Math.max(1, Math.min(2, nv))
     const temp = parseFloat(temperature)
     if (!Number.isNaN(temp)) prefs.temperature = Math.max(0, Math.min(2, temp))
-    prefs.context_chapters = clampInt(contextChapters, MIN_CONTEXT_CHAPTERS, MAX_CONTEXT_CHAPTERS) ?? DEFAULT_CONTEXT_CHAPTERS
+    prefs.context_chapters = clampInt(contextChapters, MIN_CONTEXT_CHAPTERS, Number.MAX_SAFE_INTEGER) ?? DEFAULT_CONTEXT_CHAPTERS
     prefs.target_chars = resolveTargetChars(selectedLength)
     api.updatePreferences(prefs).catch(() => {})
   }, [numVersions, temperature, contextChapters, selectedLength])
@@ -122,7 +123,7 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
     const streamParams = {
       prompt: instruction.trim() || undefined,
       target_chars: resolveTargetChars(selectedLength),
-      context_chapters: clampInt(contextChapters, MIN_CONTEXT_CHAPTERS, MAX_CONTEXT_CHAPTERS) ?? DEFAULT_CONTEXT_CHAPTERS,
+      context_chapters: clampInt(contextChapters, MIN_CONTEXT_CHAPTERS, Number.MAX_SAFE_INTEGER) ?? DEFAULT_CONTEXT_CHAPTERS,
       num_versions: clampInt(numVersions, 1, 2) || undefined,
       temperature: !Number.isNaN(parsedTemp) ? Math.max(0, Math.min(2, parsedTemp)) : undefined,
     }

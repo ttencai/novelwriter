@@ -9,17 +9,17 @@ export function useCreateChapter(novelId: number) {
     mutationFn: (data: ChapterCreateRequest) => api.createChapter(novelId, data),
     onSuccess: (created) => {
       qc.setQueryData<Chapter>(novelKeys.chapter(novelId, created.chapter_number), created)
+      const nextMeta = {
+        id: created.id,
+        novel_id: created.novel_id,
+        chapter_number: created.chapter_number,
+        title: created.title,
+        source_chapter_label: created.source_chapter_label,
+        source_chapter_number: created.source_chapter_number,
+        created_at: created.created_at,
+      }
       qc.setQueryData<ChapterMeta[]>(novelKeys.chaptersMeta(novelId), (old) => {
-        if (!old) return old
-        const nextMeta = {
-          id: created.id,
-          novel_id: created.novel_id,
-          chapter_number: created.chapter_number,
-          title: created.title,
-          source_chapter_label: created.source_chapter_label,
-          source_chapter_number: created.source_chapter_number,
-          created_at: created.created_at,
-        }
+        if (!old) return [nextMeta]
         const filtered = old.filter((meta) => meta.chapter_number !== created.chapter_number)
         return [...filtered, nextMeta].sort((a, b) => a.chapter_number - b.chapter_number)
       })

@@ -5,6 +5,7 @@ import type {
   CopilotContextTab,
   CopilotEvidence,
   CopilotFieldDelta,
+  CopilotSessionEntrypoint,
   CopilotMode,
   CopilotReviewKind,
   CopilotRun,
@@ -298,6 +299,8 @@ function parseCopilotRunListResponse(value: unknown): CopilotRunResponse[] {
 export interface CopilotSessionOpenRequest {
   mode: CopilotMode
   scope: CopilotScope
+  entrypoint?: CopilotSessionEntrypoint
+  session_key?: string
   context?: {
     entity_id?: number
     tab?: CopilotContextTab

@@ -221,7 +221,7 @@ export function SystemNavigator({ novelId, selectedId, onSelect, onOpenDraftRevi
       </div>
 
       <div className="shrink-0 p-3 border-t border-[var(--nw-glass-border)] space-y-2">
-        <WorldBuildPanel novelId={novelId} />
+        <WorldBuildPanel novelId={novelId} showAssistantChat={false} />
         <DraftReviewSummaryCard novelId={novelId} onOpen={onOpenDraftReview} />
       </div>
 

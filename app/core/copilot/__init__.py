@@ -37,10 +37,16 @@ from app.language import normalize_copilot_interaction_locale
 from app.core.copilot.prompting import (
     apply_quick_action_prompt,
     build_auto_preload as _build_auto_preload,
+    build_assistant_chat_tool_loop_system_prompt as _build_assistant_chat_tool_loop_system_prompt,
     build_copilot_system_prompt,
     build_tool_loop_system_prompt as _build_tool_loop_system_prompt,
     classify_turn_intent,
     should_preload_world_context as _should_preload_world_context,
+)
+from app.core.copilot.assistant_chat_tools import (
+    _TOOL_SCHEMAS as _ASSISTANT_CHAT_TOOL_SCHEMAS,
+    dispatch_tool as _dispatch_assistant_chat_tool,
+    tool_load_scope_snapshot as _assistant_chat_tool_load_scope_snapshot,
 )
 from app.core.copilot.scope import (
     CopilotFocusVariant,
@@ -117,6 +123,18 @@ __all__ = [
     "_tool_open",
     "_tool_read",
 ]
+
+
+def _assistant_chat_should_preload_world_context(_turn_intent: str) -> bool:
+    return False
+
+
+def _assistant_chat_evidence_from_workspace(
+    _workspace: Workspace,
+    base_evidence: list[EvidenceItem],
+    _interaction_locale: str = "zh",
+) -> list[EvidenceItem]:
+    return list(base_evidence)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -492,10 +510,12 @@ def build_session_signature(
     context: dict | None,
     interaction_locale: str,
     entrypoint: str,
+    session_key: str | None = None,
 ) -> str:
     """Deterministic signature for session dedup."""
     normalized_context = normalize_session_identity_context(mode, scope, context)
     normalized_interaction_locale = normalize_copilot_interaction_locale(interaction_locale)
+    normalized_session_key = str(session_key or "").strip() or None
     payload = json.dumps(
         {
             "mode": mode,
@@ -504,6 +524,7 @@ def build_session_signature(
             "tab": (normalized_context or {}).get("tab"),
             "locale": normalized_interaction_locale,
             "entrypoint": entrypoint,
+            "session_key": normalized_session_key,
         },
         sort_keys=True,
     )
@@ -530,13 +551,26 @@ def open_or_reuse_session(
     scope: str,
     context: dict | None,
     interaction_locale: str,
-    entrypoint: str,
-    display_title: str,
+    entrypoint: str = "copilot_drawer",
+    display_title: str = "",
+    session_key: str = "",
 ) -> tuple[CopilotSession, bool]:
     """Return (session, created).  Reuses existing unexpired session if signature matches."""
+    if entrypoint not in {"copilot_drawer", "assistant_chat"}:
+        if not display_title:
+            display_title = entrypoint
+        entrypoint = "copilot_drawer"
+
     context = canonicalize_session_context(context)
     normalized_interaction_locale = normalize_copilot_interaction_locale(interaction_locale)
-    sig = build_session_signature(mode, scope, context, normalized_interaction_locale, entrypoint)
+    sig = build_session_signature(
+        mode,
+        scope,
+        context,
+        normalized_interaction_locale,
+        entrypoint,
+        session_key,
+    )
 
     existing = _load_session_by_signature(
         db,
@@ -873,6 +907,10 @@ async def execute_copilot_run(
             session.interaction_locale,
         )
         turn_intent = classify_turn_intent(raw_prompt)
+        assistant_chat_session = _is_assistant_chat_session(session)
+        preload_world_context = (
+            not assistant_chat_session and _should_preload_world_context(turn_intent)
+        )
         evidence = (
             gather_evidence(
                 db,
@@ -881,7 +919,7 @@ async def execute_copilot_run(
                 run_context,
                 interaction_locale=session.interaction_locale,
             )
-            if _should_preload_world_context(turn_intent)
+            if preload_world_context
             else []
         )
 
@@ -927,15 +965,22 @@ async def execute_copilot_run(
         workspace: Workspace | None = None
         execution_mode = "tool_loop"
         degraded_reason: str | None = None
-        assistant_chat_session = _is_assistant_chat_session(session)
 
         try:
             if assistant_chat_session:
                 execution_mode = "one_shot_assistant_chat"
-                degraded_reason = "assistant_chat_disabled_tool_loop"
-                parsed, final_evidence = await _run_one_shot(
-                    snapshot, evidence, scenario, session_data, turn_intent, prompt, llm_config, user_id,
-                    run_id=run_id, worker_id=worker_id, db_factory=db_factory,
+                parsed, final_evidence = await _run_assistant_chat_completion(
+                    snapshot,
+                    scenario,
+                    session_data,
+                    turn_intent,
+                    prompt,
+                    llm_config,
+                    user_id,
+                    run_id=run_id,
+                    worker_id=worker_id,
+                    db_factory=db_factory,
+                    prior_messages=follow_up_messages,
                 )
             else:
                 parsed, final_evidence, workspace = await _run_tool_loop(
@@ -953,6 +998,9 @@ async def execute_copilot_run(
             parsed, final_evidence = await _run_one_shot(
                 snapshot, evidence, scenario, session_data, turn_intent, prompt, llm_config, user_id,
                 run_id=run_id, worker_id=worker_id, db_factory=db_factory,
+                assistant_chat=assistant_chat_session,
+                preload_world_context=preload_world_context,
+                prior_messages=follow_up_messages,
             )
         except RunLeaseLostError:
             logger.info("Copilot run %s lost lease during tool execution", run_id)
@@ -967,6 +1015,9 @@ async def execute_copilot_run(
                 parsed, final_evidence = await _run_one_shot(
                     snapshot, evidence, scenario, session_data, turn_intent, prompt, llm_config, user_id,
                     run_id=run_id, worker_id=worker_id, db_factory=db_factory,
+                    assistant_chat=assistant_chat_session,
+                    preload_world_context=preload_world_context,
+                    prior_messages=follow_up_messages,
                 )
             except RunLeaseLostError:
                 logger.info("Copilot run %s lost lease during fallback execution", run_id)
@@ -980,17 +1031,26 @@ async def execute_copilot_run(
         # --- compile against fresh snapshot (sync) ---
         db_compile = db_factory()
         try:
-            fresh_novel = db_compile.get(Novel, novel_id)
-            fresh_snapshot = load_scope_snapshot(
-                db_compile, fresh_novel or novel,
-                session_data["mode"], session_data["scope"], session_data["context_json"],
-            )
-            compiled = compile_suggestions(
-                parsed.get("suggestions", []) if _should_preload_world_context(turn_intent) else [],
-                final_evidence, fresh_snapshot,
-                session_data["mode"], scenario,
-                interaction_locale=session_data["interaction_locale"],
-            )
+            if assistant_chat_session:
+                compiled = []
+            else:
+                fresh_novel = db_compile.get(Novel, novel_id)
+                fresh_snapshot = load_scope_snapshot(
+                    db_compile, fresh_novel or novel,
+                    session_data["mode"], session_data["scope"], session_data["context_json"],
+                )
+                compiled = (
+                    compile_suggestions(
+                        parsed.get("suggestions", []),
+                        final_evidence,
+                        fresh_snapshot,
+                        session_data["mode"],
+                        scenario,
+                        interaction_locale=session_data["interaction_locale"],
+                    )
+                    if preload_world_context
+                    else []
+                )
         finally:
             db_compile.close()
 
@@ -1088,6 +1148,103 @@ async def _run_tool_loop(
     )
 
 
+async def _run_assistant_chat_tool_loop(
+    db_factory: Callable[[], Session],
+    novel_id: int,
+    session_data: dict[str, Any],
+    prompt: str,
+    llm_config: dict[str, Any] | None,
+    user_id: int,
+    snapshot: ScopeSnapshot,
+    scenario: str,
+    evidence: list[EvidenceItem],
+    turn_intent: str,
+    run_id: str = "",
+    worker_id: str = "",
+    inherited_workspace: dict[str, Any] | None = None,
+    prior_messages: list[dict[str, str]] | None = None,
+    workspace_seed: dict[str, Any] | None = None,
+):
+    deps = ToolLoopDeps(
+        tool_schemas=_ASSISTANT_CHAT_TOOL_SCHEMAS,
+        acquire_llm_slot=acquire_llm_slot,
+        release_llm_slot=release_llm_slot,
+        build_system_prompt=_build_assistant_chat_tool_loop_system_prompt,
+        build_auto_preload=lambda *_args, **_kwargs: "",
+        should_preload_world_context=_assistant_chat_should_preload_world_context,
+        load_scope_snapshot=load_scope_snapshot,
+        dispatch_tool=_dispatch_assistant_chat_tool,
+        tool_load_scope_snapshot=_assistant_chat_tool_load_scope_snapshot,
+        persist_workspace=_persist_workspace,
+        renew_run_lease=_renew_run_lease,
+        extract_llm_kwargs=_extract_llm_kwargs,
+        parse_llm_response=_parse_llm_response,
+        evidence_from_workspace=_assistant_chat_evidence_from_workspace,
+        lease_lost_error_factory=RunLeaseLostError,
+    )
+    return await _run_tool_loop_impl(
+        deps=deps,
+        db_factory=db_factory,
+        novel_id=novel_id,
+        session_data=session_data,
+        prompt=prompt,
+        llm_config=llm_config,
+        user_id=user_id,
+        snapshot=snapshot,
+        scenario=scenario,
+        evidence=evidence,
+        turn_intent=turn_intent,
+        run_id=run_id,
+        worker_id=worker_id,
+        inherited_workspace=inherited_workspace,
+        prior_messages=prior_messages,
+        workspace_seed=workspace_seed,
+        build_tool_journal_entry=_build_tool_journal_entry,
+    )
+
+
+async def _run_assistant_chat_completion(
+    snapshot: ScopeSnapshot,
+    scenario: str,
+    session_data: dict[str, Any],
+    turn_intent: str,
+    prompt: str,
+    llm_config: dict[str, Any] | None,
+    user_id: int,
+    *,
+    run_id: str = "",
+    worker_id: str = "",
+    db_factory: Callable[[], Session] | None = None,
+    prior_messages: list[dict[str, str]] | None = None,
+) -> tuple[dict[str, Any], list[EvidenceItem]]:
+    system_prompt = build_copilot_system_prompt(
+        snapshot,
+        [],
+        scenario,
+        session_data["interaction_locale"],
+        session_data,
+        turn_intent,
+        assistant_chat=True,
+        preload_world_context=False,
+    )
+    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    if prior_messages:
+        messages.extend(prior_messages)
+    messages.append({"role": "user", "content": prompt})
+
+    if run_id and worker_id and db_factory and not _renew_run_lease(db_factory, run_id=run_id, worker_id=worker_id):
+        raise RunLeaseLostError(run_id)
+    await acquire_llm_slot()
+    try:
+        response_text = await _call_chat_completions_llm(messages, llm_config, user_id)
+    finally:
+        release_llm_slot()
+    if run_id and worker_id and db_factory and not _renew_run_lease(db_factory, run_id=run_id, worker_id=worker_id):
+        raise RunLeaseLostError(run_id)
+
+    return {"answer": response_text, "suggestions": []}, []
+
+
 # ---------------------------------------------------------------------------
 # Degraded mode: one-shot with pre-gathered evidence (no tool calls)
 # ---------------------------------------------------------------------------
@@ -1105,17 +1262,31 @@ async def _run_one_shot(
     run_id: str = "",
     worker_id: str = "",
     db_factory: Callable[[], Session] | None = None,
+    assistant_chat: bool = False,
+    preload_world_context: bool | None = None,
+    prior_messages: list[dict[str, str]] | None = None,
 ) -> tuple[dict[str, Any], list[EvidenceItem]]:
     """Single LLM call with all evidence pre-loaded in the prompt."""
     system_prompt = build_copilot_system_prompt(
-        snapshot, evidence, scenario, session_data["interaction_locale"], session_data, turn_intent,
+        snapshot,
+        evidence,
+        scenario,
+        session_data["interaction_locale"],
+        session_data,
+        turn_intent,
+        assistant_chat=assistant_chat,
+        preload_world_context=preload_world_context,
     )
+    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    if prior_messages:
+        messages.extend(prior_messages)
+    messages.append({"role": "user", "content": prompt})
 
     if run_id and worker_id and db_factory and not _renew_run_lease(db_factory, run_id=run_id, worker_id=worker_id):
         raise RunLeaseLostError(run_id)
     await acquire_llm_slot()
     try:
-        response_text = await _call_copilot_llm(system_prompt, prompt, llm_config, user_id)
+        response_text = await _call_copilot_llm_messages(messages, llm_config, user_id)
     finally:
         release_llm_slot()
     if run_id and worker_id and db_factory and not _renew_run_lease(db_factory, run_id=run_id, worker_id=worker_id):
@@ -1172,6 +1343,21 @@ def _fail_run(
 
 
 async def _call_copilot_llm(system_prompt: str, user_prompt: str, llm_config: dict[str, Any] | None, user_id: int) -> str:
+    return await _call_copilot_llm_messages(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        llm_config,
+        user_id,
+    )
+
+
+async def _call_copilot_llm_messages(
+    messages: list[dict[str, str]],
+    llm_config: dict[str, Any] | None,
+    user_id: int,
+) -> str:
     client = AIClient()
     kwargs: dict[str, Any] = {}
     if llm_config:
@@ -1180,11 +1366,33 @@ async def _call_copilot_llm(system_prompt: str, user_prompt: str, llm_config: di
         kwargs["model"] = llm_config.get("model")
         kwargs["billing_source_hint"] = llm_config.get("billing_source_hint", "selfhost")
 
-    return await client.generate(
-        prompt=user_prompt,
-        system_prompt=system_prompt,
+    return await client.generate_from_messages(
+        messages=messages,
         max_tokens=4000,
         temperature=0.4,
+        role="default",
+        user_id=user_id,
+        **kwargs,
+    )
+
+
+async def _call_chat_completions_llm(
+    messages: list[dict[str, str]],
+    llm_config: dict[str, Any] | None,
+    user_id: int,
+) -> str:
+    client = AIClient()
+    kwargs: dict[str, Any] = {}
+    if llm_config:
+        kwargs["base_url"] = llm_config.get("base_url")
+        kwargs["api_key"] = llm_config.get("api_key")
+        kwargs["model"] = llm_config.get("model")
+        kwargs["billing_source_hint"] = llm_config.get("billing_source_hint", "selfhost")
+
+    return await client.generate_chat_completions(
+        messages=messages,
+        max_tokens=4000,
+        temperature=0.7,
         role="default",
         user_id=user_id,
         **kwargs,

@@ -96,6 +96,8 @@ def session_open(
             scope=body.scope,
             context=context,
             interaction_locale=body.interaction_locale,
+            entrypoint=body.entrypoint,
+            session_key=body.session_key,
             display_title=body.display_title,
         )
         return CopilotSessionResponse(

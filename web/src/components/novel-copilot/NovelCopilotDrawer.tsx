@@ -5,7 +5,8 @@ import { cn } from '@/lib/utils'
 import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { getCopilotScopeLabel } from './novelCopilotHelpers'
 import { useNovelCopilot } from './NovelCopilotContext'
-import type { CopilotSuggestionTarget } from '@/types/copilot'
+import { useNovelAssistantChat } from '@/components/novel-chat/NovelAssistantChatContext'
+import type { CopilotEvidence, CopilotSuggestionTarget } from '@/types/copilot'
 import {
   useOptionalNovelShell,
 } from '@/components/novel-shell/NovelShellContext'
@@ -19,6 +20,8 @@ import { NovelCopilotResearchProcess } from './NovelCopilotResearchProcess'
 import { NovelCopilotSuggestionCard } from './NovelCopilotSuggestionCard'
 import { AiStatusPill } from './AiStatusPill'
 import { NovelCopilotSessionStrip } from './NovelCopilotSessionStrip'
+import { NovelCopilotModelPicker } from './NovelCopilotModelPicker'
+import { buildWholeBookCopilotLaunchArgs } from './novelCopilotLauncher'
 import { getCopilotWorkbenchMeta } from './novelCopilotWorkbench'
 import {
   copilotDrawerShellClassName,
@@ -29,11 +32,18 @@ import {
   copilotPillClassName,
   copilotPillInteractiveClassName,
 } from './novelCopilotChrome'
+import { api } from '@/services/api'
+import { getLlmConfig, initializeLlmConfig, setLlmConfig } from '@/lib/llmConfigStore'
+import { useToast } from '@/components/world-model/shared/useToast'
 
 const sectionPanelClassName =
   `${copilotPanelClassName} rounded-[24px] p-4`
 const dashedPanelClassName =
   `${copilotPanelMutedClassName} rounded-[22px] border-dashed px-4 py-4 text-center text-sm text-muted-foreground`
+
+function buildCopilotSessionKey() {
+  return `nck_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
 
 export function NovelCopilotDrawer({
   onLocateTarget,
@@ -48,6 +58,7 @@ export function NovelCopilotDrawer({
     focusedSessionId,
     focusSession,
     removeSession,
+    openDrawer,
     focusedSession,
     activeRun,
     getSessionRun,
@@ -63,11 +74,7 @@ export function NovelCopilotDrawer({
       ? null
       : sessions.find((session) => session.sessionId === focusedSessionId) ?? null
 
-  // Keep the drawer cold until there is an actual focused session. This avoids
-  // eager world-data fanout on pages that only mount the shell-level drawer.
-  if (!isOpen || !focusedSessionMeta) return null
-
-  const activeFocusedSessionId = focusedSessionMeta.sessionId
+  if (!isOpen) return null
 
   return (
     <ActiveNovelCopilotDrawer
@@ -75,9 +82,10 @@ export function NovelCopilotDrawer({
       shell={shell}
       closeDrawer={closeDrawer}
       sessions={sessions}
-      focusedSessionId={activeFocusedSessionId}
+      focusedSessionId={focusedSessionId}
       focusSession={focusSession}
       removeSession={removeSession}
+      openDrawer={openDrawer}
       focusedSessionMeta={focusedSessionMeta}
       focusedSession={focusedSession}
       activeRun={activeRun}
@@ -91,6 +99,19 @@ export function NovelCopilotDrawer({
   )
 }
 
+function formatEvidencePrompt(evidence: CopilotEvidence, locale: string) {
+  const chapterNumber = typeof evidence.source_ref?.chapter_number === 'number'
+    ? evidence.source_ref.chapter_number
+    : null
+  const chapterLabel = chapterNumber
+    ? (locale === 'zh' ? `第${chapterNumber}章` : `Chapter ${chapterNumber}`)
+    : evidence.title
+  if (locale === 'zh') {
+    return `请基于这段章节引用继续分析：\n【${chapterLabel}】${evidence.title}\n「${evidence.excerpt}」\n\n我想确认这段引用说明了什么？它对当前设定/关系/剧情有什么影响？`
+  }
+  return `Please continue the analysis based on this chapter quote:\n[${chapterLabel}] ${evidence.title}\n"${evidence.excerpt}"\n\nWhat does this quote imply, and how does it affect the current setting, relationship, or plot?`
+}
+
 function ActiveNovelCopilotDrawer({
   onLocateTarget,
   shell,
@@ -99,24 +120,26 @@ function ActiveNovelCopilotDrawer({
   focusedSessionId,
   focusSession,
   removeSession,
+  openDrawer,
   focusedSessionMeta,
   focusedSession,
-  activeRun,
-  getSessionRun,
-  getSessionRuns,
-  submitPrompt,
-  retryInterruptedRun,
-  applySuggestions,
-  dismissSuggestions,
+  activeRun: activeRunProp,
+  getSessionRun: getSessionRunProp,
+  getSessionRuns: getSessionRunsProp,
+  submitPrompt: submitPromptProp,
+  retryInterruptedRun: retryInterruptedRunProp,
+  applySuggestions: applySuggestionsProp,
+  dismissSuggestions: dismissSuggestionsProp,
 }: {
   onLocateTarget?: (target: CopilotSuggestionTarget) => void
   shell: ReturnType<typeof useOptionalNovelShell>
   closeDrawer: () => void
   sessions: ReturnType<typeof useNovelCopilot>['sessions']
-  focusedSessionId: string
+  focusedSessionId: string | null
   focusSession: ReturnType<typeof useNovelCopilot>['focusSession']
   removeSession: ReturnType<typeof useNovelCopilot>['removeSession']
-  focusedSessionMeta: ReturnType<typeof useNovelCopilot>['sessions'][number]
+  openDrawer: ReturnType<typeof useNovelCopilot>['openDrawer']
+  focusedSessionMeta: ReturnType<typeof useNovelCopilot>['sessions'][number] | null
   focusedSession: ReturnType<typeof useNovelCopilot>['focusedSession']
   activeRun: ReturnType<typeof useNovelCopilot>['activeRun']
   getSessionRun: ReturnType<typeof useNovelCopilot>['getSessionRun']
@@ -127,9 +150,17 @@ function ActiveNovelCopilotDrawer({
   dismissSuggestions: ReturnType<typeof useNovelCopilot>['dismissSuggestions']
 }) {
   const { locale, t } = useUiLocale()
+  const assistantChat = useNovelAssistantChat()
+  const { toast } = useToast()
   const [fallbackDrawerWidth, setFallbackDrawerWidth] = useState(DEFAULT_NOVEL_SHELL_DRAWER_WIDTH)
   const [isDragging, setIsDragging] = useState(false)
   const [retryingRunId, setRetryingRunId] = useState<string | null>(null)
+  const [composerValue, setComposerValue] = useState('')
+  const [composerFocusSignal, setComposerFocusSignal] = useState(0)
+  const [modelOptions, setModelOptions] = useState<string[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [selectedModel, setSelectedModel] = useState(() => getLlmConfig().model)
+  const [useResearchSession, setUseResearchSession] = useState(true)
   const setFallbackDrawerWidthClamped = useCallback((nextWidth: number) => {
     setFallbackDrawerWidth(clampNovelShellDrawerWidth(nextWidth))
   }, [])
@@ -147,6 +178,51 @@ function ActiveNovelCopilotDrawer({
     window.addEventListener('keydown', handleEsc)
     return () => window.removeEventListener('keydown', handleEsc)
   }, [closeDrawer])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const hydrateModelOptions = async () => {
+      const currentConfig = getLlmConfig()
+      setSelectedModel(currentConfig.model)
+      setModelsLoading(true)
+      try {
+        const defaults = await api.getLlmConfigDefaults()
+        const merged = initializeLlmConfig({
+          baseUrl: defaults.base_url,
+          apiKey: defaults.api_key,
+          model: defaults.model,
+        })
+        if (cancelled) return
+        setSelectedModel(merged.model)
+
+        if (merged.baseUrl && merged.apiKey) {
+          const res = await api.listLlmModels()
+          if (cancelled) return
+          const ids = res.models.map((item) => item.id)
+          setModelOptions(ids)
+          if (!merged.model && ids.length > 0) {
+            setSelectedModel(ids[0])
+            setLlmConfig({ model: ids[0] })
+          }
+        } else {
+          setModelOptions(merged.model ? [merged.model] : [])
+        }
+      } catch {
+        if (cancelled) return
+        setModelOptions((current) => current.length > 0 ? current : (selectedModel ? [selectedModel] : []))
+        toast(t('copilot.drawer.modelLoadFailed'))
+      } finally {
+        if (!cancelled) setModelsLoading(false)
+      }
+    }
+
+    void hydrateModelOptions()
+
+    return () => {
+      cancelled = true
+    }
+  }, [toast, t])
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
@@ -185,14 +261,95 @@ function ActiveNovelCopilotDrawer({
     }
   }, [setDrawerWidth])
 
-  const session = focusedSession ?? focusedSessionMeta
-  const workbenchMeta = getCopilotWorkbenchMeta(session.prefill, session.displayTitle, locale)
-  const quickActionPrompts = Object.fromEntries(
-    workbenchMeta.quickActions.map((action) => [action.id, action.prompt]),
-  )
+  const persistSelectedModel = useCallback((nextModel: string) => {
+    setSelectedModel(nextModel)
+    setLlmConfig({ model: nextModel })
+  }, [])
+
+  const ensureAssistantSession = useCallback(() => {
+    if (assistantChat.focusedSessionId) return
+    const [prefill] = buildWholeBookCopilotLaunchArgs(shell?.routeState)
+    assistantChat.openDrawer(prefill, {
+      displayTitle: t('copilot.chat.sessionTitle'),
+    })
+  }, [assistantChat, shell, t])
+
+  const handleConversationModeChange = useCallback((nextUseResearchSession: boolean) => {
+    setUseResearchSession(nextUseResearchSession)
+    if (nextUseResearchSession) {
+      if (!focusedSessionMeta) {
+        openDrawer(...buildWholeBookCopilotLaunchArgs(shell?.routeState))
+      }
+      return
+    }
+    ensureAssistantSession()
+  }, [ensureAssistantSession, focusedSessionMeta, openDrawer, shell?.routeState])
+
+  const activeSessions = useResearchSession ? sessions : assistantChat.sessions
+  const activeFocusedSessionId = useResearchSession ? focusedSessionId : assistantChat.focusedSessionId
+  const activeFocusSession = useResearchSession ? focusSession : assistantChat.focusSession
+  const activeRemoveSession = useResearchSession ? removeSession : assistantChat.removeSession
+  const activeFocusedSessionMeta =
+    activeFocusedSessionId == null
+      ? null
+      : activeSessions.find((candidate) => candidate.sessionId === activeFocusedSessionId) ?? null
+  const session = useResearchSession
+    ? (focusedSession ?? focusedSessionMeta)
+    : (assistantChat.focusedSession ?? activeFocusedSessionMeta)
+  const activeRun = useResearchSession ? activeRunProp : assistantChat.activeRun
+  const activeGetSessionRun = useResearchSession ? getSessionRunProp : assistantChat.getSessionRun
+  const activeGetSessionRuns = useResearchSession ? getSessionRunsProp : assistantChat.getSessionRuns
+  const activeSubmitPrompt = useResearchSession ? submitPromptProp : assistantChat.submitPrompt
+  const activeRetryInterruptedRun = useResearchSession ? retryInterruptedRunProp : assistantChat.retryInterruptedRun
+  const activeApplySuggestions = useResearchSession ? applySuggestionsProp : assistantChat.applySuggestions
+  const activeDismissSuggestions = useResearchSession ? dismissSuggestionsProp : assistantChat.dismissSuggestions
+  const workbenchMeta = useResearchSession && session
+    ? getCopilotWorkbenchMeta(session.prefill, session.displayTitle, locale)
+    : null
+  const quickActionPrompts = workbenchMeta
+    ? Object.fromEntries(workbenchMeta.quickActions.map((action) => [action.id, action.prompt]))
+    : {}
+  const scopeLabel = useResearchSession && session ? getCopilotScopeLabel(session.prefill, locale) : null
+  const sessionRuns = session ? activeGetSessionRuns(session.sessionId) : []
+  const focusedStatus =
+    !session
+      ? 'idle'
+      : activeRun?.status === 'queued' || activeRun?.status === 'running'
+        ? 'running'
+        : activeRun?.status === 'error' || activeRun?.status === 'interrupted'
+          ? 'error'
+          : 'connected'
+  const isFocusedSessionBusy = session != null && (activeRun?.status === 'queued' || activeRun?.status === 'running')
+
+  const handleCreateSession = useCallback(() => {
+    if (!useResearchSession) {
+      const [prefill] = buildWholeBookCopilotLaunchArgs(shell?.routeState)
+      assistantChat.openDrawer(prefill, {
+        displayTitle: t('copilot.chat.sessionTitle'),
+        sessionKey: buildCopilotSessionKey(),
+      })
+      return
+    }
+
+    if (session) {
+      openDrawer(session.prefill, {
+        displayTitle: session.displayTitle,
+        sessionKey: buildCopilotSessionKey(),
+      })
+      return
+    }
+
+    const [prefill, options] = buildWholeBookCopilotLaunchArgs(shell?.routeState)
+    openDrawer(prefill, {
+      ...options,
+      sessionKey: buildCopilotSessionKey(),
+    })
+  }, [assistantChat, openDrawer, session, shell, t, useResearchSession])
 
   const handleAction = (action: string) => {
-    void submitPrompt(
+    if (!useResearchSession || !session) return
+    persistSelectedModel(selectedModel)
+    void activeSubmitPrompt(
       session.sessionId,
       quickActionPrompts[action] ?? t('copilot.drawer.fallbackPrompt'),
       session.prefill.scope,
@@ -202,27 +359,24 @@ function ActiveNovelCopilotDrawer({
   }
 
   const handleSubmit = (prompt: string) => {
-    void submitPrompt(session.sessionId, prompt, session.prefill.scope, session.prefill.context)
+    if (!session) return
+    persistSelectedModel(selectedModel)
+    void activeSubmitPrompt(session.sessionId, prompt, session.prefill.scope, session.prefill.context)
   }
 
-  const scopeLabel = getCopilotScopeLabel(session.prefill, locale)
-  const sessionRuns = getSessionRuns(session.sessionId)
-  const focusedStatus =
-    activeRun?.status === 'queued' || activeRun?.status === 'running'
-      ? 'running'
-      : activeRun?.status === 'error' || activeRun?.status === 'interrupted'
-        ? 'error'
-        : 'connected'
-  const isFocusedSessionBusy = activeRun?.status === 'queued' || activeRun?.status === 'running'
+  const handleAskAboutEvidence = useCallback((evidence: CopilotEvidence) => {
+    setComposerValue(formatEvidencePrompt(evidence, locale))
+    setComposerFocusSignal((current) => current + 1)
+  }, [locale])
 
   const handleRetryInterruptedRun = useCallback((runId: string) => {
-    if (retryingRunId === runId || isFocusedSessionBusy) return
+    if (!session || retryingRunId === runId || isFocusedSessionBusy) return
 
     setRetryingRunId(runId)
-    void retryInterruptedRun(session.sessionId, runId).finally(() => {
+    void activeRetryInterruptedRun(session.sessionId, runId).finally(() => {
       setRetryingRunId((current) => (current === runId ? null : current))
     })
-  }, [isFocusedSessionBusy, retryInterruptedRun, retryingRunId, session.sessionId])
+  }, [activeRetryInterruptedRun, isFocusedSessionBusy, retryingRunId, session])
 
   return (
     <>
@@ -266,17 +420,56 @@ function ActiveNovelCopilotDrawer({
                         Novel Copilot
                       </span>
                     </div>
+                    <div className="mt-3 flex flex-col items-start gap-1.5">
+                      <div className="px-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/72">
+                        {t('copilot.drawer.modeSwitch')}
+                      </div>
+                      <div className={cn('inline-flex items-center rounded-[16px] border p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]', copilotPanelMutedClassName, 'border-[var(--nw-copilot-border)]')}>
+                        <button
+                          type="button"
+                          onClick={() => handleConversationModeChange(false)}
+                          className={cn(
+                            'rounded-[12px] px-3 py-1.5 text-[11px] font-semibold tracking-[0.01em] transition-all duration-200',
+                            !useResearchSession
+                              ? 'bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] shadow-[0_10px_24px_hsl(var(--accent)/0.28)]'
+                              : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+                          )}
+                        >
+                          {t('copilot.drawer.modeChat')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleConversationModeChange(true)}
+                          className={cn(
+                            'rounded-[12px] px-3 py-1.5 text-[11px] font-semibold tracking-[0.01em] transition-all duration-200',
+                            useResearchSession
+                              ? 'bg-foreground/12 text-foreground shadow-[0_10px_24px_rgba(15,23,42,0.16)]'
+                              : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
+                          )}
+                        >
+                          {t('copilot.drawer.modeResearch')}
+                        </button>
+                      </div>
+                    </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                       <AiStatusPill status={focusedStatus} />
-                      <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.16em] text-muted-foreground/80', copilotPillClassName)}>
-                        {scopeLabel}
-                      </span>
+                      {scopeLabel ? (
+                        <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.16em] text-muted-foreground/80', copilotPillClassName)}>
+                          {scopeLabel}
+                        </span>
+                      ) : null}
                       <span className={cn('inline-flex items-center rounded-full px-2 py-0.5 text-[10px] text-muted-foreground/75', copilotPillClassName)}>
-                        {t('copilot.drawer.sessionsCount', { count: sessions.length })}
+                        {t('copilot.drawer.sessionsCount', { count: activeSessions.length })}
                       </span>
                     </div>
                     <div className="mt-2 truncate text-[11px] text-muted-foreground/70">
-                      {t('copilot.drawer.currentWorkspace', { title: session.displayTitle })}
+                      {session
+                        ? (
+                          useResearchSession
+                            ? t('copilot.drawer.currentWorkspace', { title: session.displayTitle })
+                            : t('copilot.chat.currentSession', { title: session.displayTitle })
+                        )
+                        : t('copilot.drawer.emptyCurrentWorkspace')}
                     </div>
                   </div>
                 </div>
@@ -295,15 +488,54 @@ function ActiveNovelCopilotDrawer({
           </div>
 
           <NovelCopilotSessionStrip
-            sessions={sessions}
-            focusedSessionId={focusedSessionId}
-            getSessionStatus={(sessionId) => getSessionRun(sessionId)?.status ?? null}
-            onFocusSession={focusSession}
-            onRemoveSession={removeSession}
+            sessions={activeSessions}
+            focusedSessionId={activeFocusedSessionId}
+            getSessionStatus={(sessionId) => activeGetSessionRun(sessionId)?.status ?? null}
+            onFocusSession={activeFocusSession}
+            onRemoveSession={activeRemoveSession}
+            onCreateSession={handleCreateSession}
           />
 
           <div className="nw-scrollbar-thin flex-1 overflow-y-auto px-4 py-5">
-            {sessionRuns.length === 0 && (
+            {!session && (
+              <div className="animate-in space-y-3 fade-in duration-500" data-testid="novel-copilot-empty-state">
+                <div className={cn('relative overflow-hidden rounded-[24px] px-4 py-4', copilotPanelStrongClassName)}>
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-14 bg-[radial-gradient(circle_at_top_left,var(--nw-copilot-glow-4),transparent_62%)] [mix-blend-mode:var(--nw-copilot-glow-blend)] opacity-[var(--nw-copilot-glow-op)]" />
+                  <div className="pointer-events-none absolute inset-y-0 right-0 w-24 bg-[radial-gradient(circle_at_right,var(--nw-copilot-glow-2),transparent_68%)] [mix-blend-mode:var(--nw-copilot-glow-blend)] opacity-[calc(var(--nw-copilot-glow-op)*0.8)]" />
+                  <div className="relative">
+                    <div className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/70">
+                      {useResearchSession ? t('copilot.card.workbenchEyebrow') : t('copilot.chat.badge')}
+                    </div>
+                    <div className="mt-1.5 text-sm font-medium text-foreground/90">
+                      {useResearchSession ? t('copilot.drawer.emptyTitle') : t('copilot.chat.title')}
+                    </div>
+                    <div className="mt-2 text-[13px] leading-relaxed text-muted-foreground/80">
+                      {useResearchSession ? t('copilot.drawer.emptyDescription') : t('copilot.chat.emptyHint')}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => (
+                        useResearchSession
+                          ? openDrawer(...buildWholeBookCopilotLaunchArgs(shell?.routeState))
+                          : ensureAssistantSession()
+                      )}
+                      data-testid="novel-copilot-open-whole-book"
+                      className={cn(
+                        'mt-4 inline-flex items-center rounded-full px-3.5 py-2 text-[12px] font-medium text-foreground/88',
+                        copilotPillInteractiveClassName,
+                      )}
+                    >
+                      {useResearchSession ? t('copilot.drawer.emptyCta') : t('copilot.drawer.modeChat')}
+                    </button>
+                  </div>
+                </div>
+                <div className={dashedPanelClassName}>
+                  {useResearchSession ? t('copilot.drawer.emptyHint') : t('copilot.chat.emptyHint')}
+                </div>
+              </div>
+            )}
+
+            {session && sessionRuns.length === 0 && useResearchSession && workbenchMeta && (
               <div className="animate-in space-y-3 fade-in duration-700">
                 <div className={cn('relative overflow-hidden rounded-[24px] px-4 py-4', copilotPanelStrongClassName)}>
                   <div className="pointer-events-none absolute inset-x-0 top-0 h-14 bg-[radial-gradient(circle_at_top_left,var(--nw-copilot-glow-4),transparent_62%)] [mix-blend-mode:var(--nw-copilot-glow-blend)] opacity-[var(--nw-copilot-glow-op)]" />
@@ -330,7 +562,24 @@ function ActiveNovelCopilotDrawer({
               </div>
             )}
 
-            {sessionRuns.length > 0 && (
+            {session && sessionRuns.length === 0 && !useResearchSession && (
+              <div className="animate-in space-y-3 fade-in duration-700">
+                <div className={cn('relative overflow-hidden rounded-[24px] px-4 py-4', copilotPanelStrongClassName)}>
+                  <div className="pointer-events-none absolute inset-x-0 top-0 h-14 bg-[radial-gradient(circle_at_top_left,var(--nw-copilot-glow-4),transparent_62%)] [mix-blend-mode:var(--nw-copilot-glow-blend)] opacity-[var(--nw-copilot-glow-op)]" />
+                  <div className="pointer-events-none absolute inset-y-0 right-0 w-24 bg-[radial-gradient(circle_at_right,var(--nw-copilot-glow-2),transparent_68%)] [mix-blend-mode:var(--nw-copilot-glow-blend)] opacity-[calc(var(--nw-copilot-glow-op)*0.8)]" />
+                  <div className="relative space-y-2">
+                    <div className="text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/70">
+                      {t('copilot.chat.badge')}
+                    </div>
+                    <div className="text-sm font-medium text-foreground/90">
+                      {t('copilot.chat.emptyHint')}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {session && sessionRuns.length > 0 && (
               <div className="animate-in flex flex-col justify-end space-y-4 fade-in slide-in-from-bottom-2 duration-500">
                 {sessionRuns.map((run, index) => {
                   const isLatestRun = index === sessionRuns.length - 1
@@ -402,14 +651,18 @@ function ActiveNovelCopilotDrawer({
                       {run.status === 'completed' && run.answer && (
                         <div className={cn(copilotPanelClassName, 'rounded-[22px] rounded-tl-md px-4 py-3')}>
                           <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground/70">
-                            {t('copilot.drawer.analysisResult')}
+                            {useResearchSession ? t('copilot.drawer.analysisResult') : t('copilot.chat.badge')}
                           </div>
                           <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">{run.answer}</div>
                         </div>
                       )}
 
-                      {(run.trace?.length > 0 || run.evidence?.length > 0) && (
-                        <NovelCopilotResearchProcess trace={run.trace} evidence={run.evidence} />
+                      {useResearchSession && (run.trace?.length > 0 || run.evidence?.length > 0) && (
+                        <NovelCopilotResearchProcess
+                          trace={run.trace}
+                          evidence={run.evidence}
+                          onAskAboutEvidence={handleAskAboutEvidence}
+                        />
                       )}
 
                       {run.status === 'completed' && pendingSuggestions.length > 0 && (
@@ -425,8 +678,8 @@ function ActiveNovelCopilotDrawer({
                               <NovelCopilotSuggestionCard
                                 key={s.suggestion_id}
                                 suggestion={s}
-                                onApply={(id) => void applySuggestions(session.sessionId, run.run_id, [id])}
-                                onDismiss={(id) => void dismissSuggestions(session.sessionId, run.run_id, [id])}
+                                onApply={(id) => void activeApplySuggestions(session.sessionId, run.run_id, [id])}
+                                onDismiss={(id) => void activeDismissSuggestions(session.sessionId, run.run_id, [id])}
                                 onLocateTarget={onLocateTarget}
                               />
                             ))}
@@ -474,11 +727,34 @@ function ActiveNovelCopilotDrawer({
           </div>
 
           <div className="shrink-0 border-t border-[var(--nw-copilot-border)] bg-[linear-gradient(180deg,hsl(var(--foreground)/0.03),transparent)] p-4">
+            <div className={cn('mb-3 rounded-[18px] px-3 py-2.5', copilotPanelMutedClassName)}>
+              <div className="mb-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/72">
+                {t('copilot.drawer.modelLabel')}
+              </div>
+              <NovelCopilotModelPicker
+                value={selectedModel}
+                options={modelOptions}
+                loading={modelsLoading}
+                disabled={isFocusedSessionBusy || modelsLoading}
+                onChange={persistSelectedModel}
+              />
+            </div>
             <NovelCopilotComposer
               onSubmit={handleSubmit}
-              disabled={isFocusedSessionBusy}
-              label={workbenchMeta.composerLabel}
-              placeholder={workbenchMeta.composerPlaceholder}
+              disabled={isFocusedSessionBusy || !session}
+              label={
+                useResearchSession
+                  ? (workbenchMeta?.composerLabel ?? t('copilot.drawer.emptyComposerLabel'))
+                  : t('copilot.chat.composerLabel')
+              }
+              placeholder={
+                useResearchSession
+                  ? (workbenchMeta?.composerPlaceholder ?? t('copilot.drawer.emptyComposerPlaceholder'))
+                  : t('copilot.chat.composerPlaceholder')
+              }
+              value={composerValue}
+              onValueChange={setComposerValue}
+              focusSignal={composerFocusSignal}
             />
           </div>
         </div>

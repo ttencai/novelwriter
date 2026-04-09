@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.core.auth import get_current_user_or_default
 from app.core.ai_client import (
+    _collect_response_stream_text,
     _extract_response_text,
     _extract_usage_pair,
     _normalize_base_url,
@@ -40,11 +41,12 @@ async def _probe_stream_support(client: AsyncOpenAI, model: str) -> None:
             max_output_tokens=4,
             stream=True,
         )
-        async for _event in stream:
-            pass
-        return
+        text, _response, _prompt_tokens, _completion_tokens, _finish_reason = await _collect_response_stream_text(stream)
+        if text:
+            return
+        raise ValueError("Responses stream returned empty text")
     except Exception as exc:
-        if not _responses_unsupported(exc):
+        if not _responses_unsupported(exc) and "empty text" not in str(exc).lower():
             raise
 
     request_kwargs = {
@@ -63,22 +65,43 @@ async def _probe_stream_support(client: AsyncOpenAI, model: str) -> None:
             raise
         stream = await client.chat.completions.create(**request_kwargs)
 
-    async for _chunk in stream:
-        pass
+    saw_text = False
+    async for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            saw_text = True
+    if not saw_text:
+        raise ValueError("Chat Completions stream returned empty text")
 
 
 async def _probe_json_mode_support(client: AsyncOpenAI, model: str) -> None:
+    raw = ""
     try:
-        response = await client.responses.create(
+        stream = await client.responses.create(
             model=model,
             instructions='Return a JSON object: {"ok": true}. Return JSON only.',
             input="respond now",
             max_output_tokens=32,
+            stream=True,
         )
-        raw = _extract_response_text(response)
+        raw, _response, _prompt_tokens, _completion_tokens, _finish_reason = await _collect_response_stream_text(stream)
     except Exception as exc:
-        if not _responses_unsupported(exc):
+        if not _responses_unsupported(exc) and "empty text" not in str(exc).lower():
             raise
+
+    if not raw.strip():
+        try:
+            response = await client.responses.create(
+                model=model,
+                instructions='Return a JSON object: {"ok": true}. Return JSON only.',
+                input="respond now",
+                max_output_tokens=32,
+            )
+            raw = _extract_response_text(response)
+        except Exception as exc:
+            if not _responses_unsupported(exc):
+                raise
+
+    if not raw.strip():
         response = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": 'Return a JSON object: {"ok": true}'}],
@@ -205,21 +228,35 @@ async def test_llm_connection(
     errors: dict[str, str] = {}
     try:
         try:
-            response = await client.responses.create(
+            stream = await client.responses.create(
                 model=config["model"],
                 input="hi",
-                max_output_tokens=1,
+                max_output_tokens=4,
+                stream=True,
             )
+            raw, _response, prompt_tokens, completion_tokens, _finish_reason = await _collect_response_stream_text(stream)
+            if not raw.strip():
+                response = await client.responses.create(
+                    model=config["model"],
+                    input="hi",
+                    max_output_tokens=1,
+                )
+                raw = (_extract_response_text(response) or "").strip()
+                prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
+            if not raw.strip():
+                raise ValueError("Responses API returned empty text")
             capabilities["basic"] = True
-            prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
         except Exception as exc:
-            if not _responses_unsupported(exc):
+            if not _responses_unsupported(exc) and "empty text" not in str(exc).lower():
                 raise
             response = await client.chat.completions.create(
                 model=config["model"],
                 messages=[{"role": "user", "content": "hi"}],
-                max_tokens=1,
+                max_tokens=4,
             )
+            raw = (response.choices[0].message.content or "").strip() if response.choices else ""
+            if not raw:
+                raise ValueError("Chat Completions returned empty text")
             capabilities["basic"] = True
             usage = getattr(response, "usage", None)
             try:

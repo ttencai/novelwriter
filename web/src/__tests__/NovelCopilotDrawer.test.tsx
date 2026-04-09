@@ -8,6 +8,7 @@ import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
 import {
   NovelCopilotProvider,
 } from '@/components/novel-copilot/NovelCopilotProvider'
+import { NovelAssistantChatProvider } from '@/components/novel-chat/NovelAssistantChatProvider'
 import { useNovelCopilot } from '@/components/novel-copilot/NovelCopilotContext'
 import { NovelCopilotDrawer } from '@/components/novel-copilot/NovelCopilotDrawer'
 import { ToastProvider } from '@/components/world-model/shared/Toast'
@@ -20,6 +21,8 @@ const mockCreateRun = vi.fn()
 const mockPollRun = vi.fn()
 const mockApplySuggestions = vi.fn()
 const mockDismissSuggestions = vi.fn()
+const mockGetLlmConfigDefaults = vi.fn()
+const mockListLlmModels = vi.fn()
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -35,6 +38,11 @@ vi.mock('@/services/api', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/services/api')>()
   return {
     ...original,
+    api: {
+      ...original.api,
+      getLlmConfigDefaults: (...args: unknown[]) => mockGetLlmConfigDefaults(...args),
+      listLlmModels: (...args: unknown[]) => mockListLlmModels(...args),
+    },
     copilotApi: {
       openSession: (...args: unknown[]) => mockOpenSession(...args),
       listRuns: (...args: unknown[]) => mockListRuns(...args),
@@ -52,6 +60,14 @@ vi.mock('@/services/api', async (importOriginal) => {
 beforeEach(() => {
   localStorage.clear()
   document.documentElement.lang = 'zh-CN'
+  mockGetLlmConfigDefaults.mockReset().mockResolvedValue({
+    base_url: 'https://example.com/v1',
+    api_key: 'sk-test',
+    model: 'glm-4.5-flash',
+  })
+  mockListLlmModels.mockReset().mockResolvedValue({
+    models: [{ id: 'glm-4.5-flash' }, { id: 'deepseek-chat' }],
+  })
   // Copilot API mocks
   mockOpenSession.mockReset().mockResolvedValue({
     session_id: 'backend-session-1',
@@ -151,10 +167,14 @@ function DrawerHarness() {
           createElement(
             NovelCopilotProvider,
             { novelId: 1, interactionLocale: 'zh' },
-            createElement(SearchEcho),
-            createElement(SessionCountProbe),
-            createElement(DrawerTriggers),
-            createElement(ConnectedDrawer),
+            createElement(
+              NovelAssistantChatProvider,
+              { novelId: 1, interactionLocale: 'zh', autoInitialize: false },
+              createElement(SearchEcho),
+              createElement(SessionCountProbe),
+              createElement(DrawerTriggers),
+              createElement(ConnectedDrawer),
+            ),
           ),
         ),
       ),
@@ -264,6 +284,24 @@ describe('NovelCopilotDrawer', () => {
     })
   })
 
+  it('keeps drawer sessions isolated from assistant-chat entrypoints at the API boundary', async () => {
+    const user = userEvent.setup()
+    render(createElement(DrawerHarness))
+
+    await user.click(screen.getByRole('button', { name: 'open-whole-book' }))
+
+    await waitFor(() => {
+      expect(mockOpenSession).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          mode: 'research',
+          scope: 'whole_book',
+          entrypoint: 'copilot_drawer',
+        }),
+      )
+    })
+  })
+
   it('reuses the same current-entity session across studio and atlas UI contexts', async () => {
     const user = userEvent.setup()
     render(createElement(DrawerHarness))
@@ -277,6 +315,7 @@ describe('NovelCopilotDrawer', () => {
         expect.objectContaining({
           mode: 'current_entity',
           scope: 'current_entity',
+          entrypoint: 'copilot_drawer',
           context: { entity_id: 101 },
         }),
       )
@@ -441,6 +480,107 @@ describe('NovelCopilotDrawer', () => {
     } finally {
       document.documentElement.classList.remove('light')
     }
+  })
+
+  it('allows choosing a chat model from the drawer and persists it before sending', async () => {
+    const user = userEvent.setup()
+    render(createElement(DrawerHarness))
+
+    await user.click(screen.getByRole('button', { name: 'open-current-entity' }))
+
+    const modelSelect = await screen.findByTestId('copilot-model-select')
+    expect(modelSelect).toBeTruthy()
+    await user.click(modelSelect)
+    await user.click(await screen.findByRole('button', { name: 'deepseek-chat' }))
+
+    await user.type(
+      screen.getByPlaceholderText('输入补充要求，例如“优先补足苏瑶与宗门的关联线索”'),
+      '补完苏瑶的设定锚点{enter}',
+    )
+
+    await waitFor(() => {
+      expect(mockCreateRun).toHaveBeenCalled()
+    })
+  })
+
+  it('keeps the drawer open and shows the empty landing state after closing the last session', async () => {
+    const user = userEvent.setup()
+    render(createElement(DrawerHarness))
+
+    await user.click(screen.getByRole('button', { name: 'open-whole-book' }))
+    expect(await screen.findByTestId('novel-copilot-drawer')).toBeTruthy()
+
+    const wholeBookSession = await screen.findByTestId(/novel-copilot-session-ncs_/)
+    await user.click(within(wholeBookSession).getByRole('button', { name: '关闭会话' }))
+
+    expect(screen.getByTestId('novel-copilot-drawer')).toBeTruthy()
+    expect(screen.queryByTestId('novel-copilot-session-strip')).toBeNull()
+    expect(screen.getByTestId('novel-copilot-empty-state')).toBeTruthy()
+    expect(screen.getByTestId('novel-copilot-open-whole-book')).toBeTruthy()
+  })
+
+  it('can switch the drawer into normal chat mode and route through assistant_chat sessions', async () => {
+    const user = userEvent.setup()
+    render(createElement(DrawerHarness))
+
+    await user.click(screen.getByRole('button', { name: 'open-whole-book' }))
+    await screen.findByTestId('novel-copilot-drawer')
+
+    await user.click(screen.getByRole('button', { name: '普通对话' }))
+
+    await waitFor(() => {
+      expect(mockOpenSession).toHaveBeenLastCalledWith(
+        1,
+        expect.objectContaining({
+          entrypoint: 'assistant_chat',
+          display_title: 'AI 对话',
+        }),
+      )
+    })
+    expect(screen.getByPlaceholderText('直接输入问题即可；关闭“全书研究”后，这里会按普通聊天方式回复。')).toBeTruthy()
+  })
+
+  it('can create a second parallel session from the session strip plus button', async () => {
+    const user = userEvent.setup()
+    render(createElement(DrawerHarness))
+
+    await user.click(screen.getByRole('button', { name: 'open-whole-book' }))
+    await screen.findByTestId('novel-copilot-drawer')
+    expect(screen.getByTestId('copilot-session-count')).toHaveTextContent('1')
+
+    await user.click(screen.getByTestId('novel-copilot-create-session'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('copilot-session-count')).toHaveTextContent('2')
+    })
+    expect(mockOpenSession).toHaveBeenCalledTimes(2)
+    expect(mockOpenSession.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({
+        mode: 'research',
+        scope: 'whole_book',
+        session_key: expect.any(String),
+      }),
+    )
+  })
+
+  it('can quote chapter evidence back into the composer for a follow-up question', async () => {
+    const user = userEvent.setup()
+    render(createElement(DrawerHarness))
+
+    await user.click(screen.getByRole('button', { name: 'open-current-entity' }))
+    await user.type(
+      screen.getByPlaceholderText('输入补充要求，例如“优先补足苏瑶与宗门的关联线索”'),
+      '补完苏瑶的设定锚点{enter}',
+    )
+    await screen.findByText('补完 苏瑶 的设定锚点', {}, { timeout: 3000 })
+
+    await user.click(screen.getByRole('button', { name: '展开研究过程' }))
+    await user.click(screen.getByRole('button', { name: /第1章/ }))
+    await user.click(screen.getByRole('button', { name: '引用到问题' }))
+
+    const composer = screen.getByPlaceholderText('输入补充要求，例如“优先补足苏瑶与宗门的关联线索”') as HTMLTextAreaElement
+    expect(composer.value).toContain('请基于这段章节引用继续分析：')
+    expect(composer.value).toContain('苏瑶与古老宗门之间的牵连被再次提起')
   })
 
   it('shows a friendly apply failure toast instead of silently doing nothing', async () => {

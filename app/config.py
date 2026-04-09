@@ -6,12 +6,12 @@ from pydantic_settings import BaseSettings
 
 
 MIN_CONTEXT_CHAPTERS = 1
-MAX_CONTEXT_CHAPTERS = 5
+MAX_CONTEXT_CHAPTERS = 1000000
 DEFAULT_CONTEXT_CHAPTERS = 5
 
 
 def clamp_context_chapters(value: int) -> int:
-    return max(MIN_CONTEXT_CHAPTERS, min(MAX_CONTEXT_CHAPTERS, int(value)))
+    return max(MIN_CONTEXT_CHAPTERS, int(value))
 
 
 def resolve_context_chapters(value: int | None, *, default: int | None = None) -> int:
@@ -116,6 +116,11 @@ class Settings(BaseSettings):
     copilot_run_queue_timeout_seconds: int = 30
     copilot_run_lease_seconds: int = 300
     copilot_run_stale_timeout_seconds: int = 300
+    assistant_chat_web_search_enabled: bool = True
+    assistant_chat_fetch_url_enabled: bool = True
+    assistant_chat_search_timeout_seconds: int = 10
+    assistant_chat_search_max_results: int = 5
+    assistant_chat_fetch_max_chars: int = 12000
 
     # Event tracking (product analytics). Selfhost: off by default. Hosted: enable via env.
     enable_event_tracking: bool = False

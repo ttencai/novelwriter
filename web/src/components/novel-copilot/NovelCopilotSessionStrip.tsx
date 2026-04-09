@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { Plus, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUiLocale } from '@/contexts/UiLocaleContext'
 import type { CopilotRunStatus, NovelCopilotSession } from '@/types/copilot'
@@ -19,12 +19,14 @@ export function NovelCopilotSessionStrip({
   getSessionStatus,
   onFocusSession,
   onRemoveSession,
+  onCreateSession,
 }: {
   sessions: NovelCopilotSession[]
   focusedSessionId: string | null
   getSessionStatus: (sessionId: string) => CopilotRunStatus | null
   onFocusSession: (sessionId: string) => void
   onRemoveSession: (sessionId: string) => void
+  onCreateSession: () => void
 }) {
   const { locale, t } = useUiLocale()
   if (sessions.length === 0) return null
@@ -115,6 +117,26 @@ export function NovelCopilotSessionStrip({
               </div>
             )
           })}
+          <button
+            type="button"
+            onClick={onCreateSession}
+            aria-label={t('copilot.sessionStrip.create')}
+            data-testid="novel-copilot-create-session"
+            className={cn(
+              'group shrink-0 self-center rounded-full border border-dashed transition-all duration-300 hover:-translate-y-0.5 hover:border-[var(--nw-copilot-border-strong)] hover:[background:var(--nw-copilot-pill-hover-bg)]',
+              copilotSessionInactiveClassName,
+            )}
+            title={t('copilot.sessionStrip.create')}
+          >
+            <span
+              className={cn(
+                'inline-flex h-12 w-12 items-center justify-center rounded-full text-foreground/86',
+                copilotPillInteractiveClassName,
+              )}
+            >
+              <Plus className="h-5 w-5" />
+            </span>
+          </button>
         </div>
       </div>
     </div>

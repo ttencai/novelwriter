@@ -188,14 +188,14 @@ export function LlmConfigCard() {
                     </button>
                 </div>
                 {showModelList && models.length > 0 ? (
-                    <div className="absolute top-full z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] p-1 shadow-2xl backdrop-blur-xl">
+                    <div className="absolute top-full z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-[var(--nw-glass-border)] bg-[hsl(var(--background))] p-1 shadow-2xl">
                         {models.map((item) => (
                             <button
                                 key={item}
                                 type="button"
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => selectModel(item)}
-                                className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-white/8 ${item === model ? 'bg-white/10 text-accent' : 'text-foreground'}`}
+                                className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-[hsl(var(--muted))] ${item === model ? 'bg-[hsl(var(--muted))] text-accent' : 'text-foreground'}`}
                             >
                                 {item}
                             </button>

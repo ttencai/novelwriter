@@ -939,6 +939,76 @@ def _build_intent_behavior_text(turn_intent: str, interaction_locale: str = "zh"
     return _prompt_text(interaction_locale, "intent_task_query")
 
 
+def _build_assistant_chat_intent_behavior_text(turn_intent: str, interaction_locale: str = "zh") -> str:
+    if interaction_locale == "en":
+        if turn_intent == "smalltalk":
+            return (
+                "The current input is casual conversation. Reply naturally and feel free to answer general "
+                "knowledge, chat, writing, translation, coding, and everyday-advice questions without treating "
+                "the current workbench as a hard boundary."
+            )
+        if turn_intent == "capability_query":
+            return (
+                "The user is asking what you can do. Answer as a general-purpose chat assistant and list 4-6 "
+                "kinds of help you can provide right now. The current workbench context is optional background, "
+                "not your capability boundary."
+            )
+        return (
+            "The current input is a general task or question. Answer it directly. Unless the user is explicitly "
+            "asking about the current novel or world model, do not bind the answer to the current workbench. "
+            "If the question depends on live external information and you do not have live access, say that "
+            "plainly instead of claiming you can only help with the novel workspace."
+        )
+
+    if turn_intent == "smalltalk":
+        return "当前输入更像轻松对话。请自然接话，可以自由回答常识、闲聊、写作、翻译、编程和一般建议类问题，不必受当前工作台边界限制。"
+    if turn_intent == "capability_query":
+        return "当前输入是在询问你能做什么。请以通用对话助手身份作答，可概括 4-6 类你现在就能提供的帮助；当前工作台上下文只是可选背景，不是你的能力边界。"
+    return "当前输入是一般任务或问题。优先直接回答用户问题；除非问题明确与当前小说或世界模型有关，否则不要把回答绑定到当前工作台。若问题依赖实时外部信息而你没有实时访问能力，请直接说明缺少实时数据，而不是说自己只能处理小说工作台问题。"
+
+
+def _build_assistant_chat_system_prompt(
+    *,
+    workbench_context: str,
+    locale_instr: str,
+    intent_behavior: str,
+    interaction_locale: str,
+) -> str:
+    if interaction_locale == "en":
+        return (
+            'You are the app\'s persistent AI chat assistant inside the "AI Chat" area.\n\n'
+            "## Behavior for this turn\n"
+            f"{intent_behavior}\n\n"
+            "## Optional app context\n"
+            f"{workbench_context}\n"
+            "Use the app context above only when the user is explicitly asking about the current novel, chapter, "
+            "entities, relationships, settings, or drafts. It is optional background, not a hard capability boundary.\n\n"
+            "## Language rules\n"
+            f"{locale_instr}\n\n"
+            "## Rules\n"
+            "1. This is a normal multi-turn chat area, so answer directly in natural language\n"
+            "2. Keep using the conversation history in this thread when it matters\n"
+            "3. Do not reinterpret every question as a novel-workbench task\n"
+            "4. When the user does ask about the current novel, you may use the app context above as helpful background"
+        )
+
+    return (
+        "你是应用内常驻“AI 对话区”的通用聊天助手。\n\n"
+        "## 本轮回答原则\n"
+        f"{intent_behavior}\n\n"
+        "## 可选的应用上下文\n"
+        f"{workbench_context}\n"
+        "以上上下文只在用户明确聊到当前小说、章节、实体、关系、设定或草稿时作为参考；它不是你的能力边界。\n\n"
+        "## 语言规则\n"
+        f"{locale_instr}\n\n"
+        "## 规则\n"
+        "1. 这是普通多轮聊天窗口，也是一个通用对话区，直接用自然语言回答\n"
+        "2. 回答时继续利用当前线程里的上下文历史\n"
+        "3. 不要把所有问题都解释成小说工作台问题\n"
+        "4. 用户讨论当前小说内容时，再利用上面的应用上下文来辅助回答"
+    )
+
+
 def _build_runtime_instruction_text(
     snapshot: ScopeSnapshot,
     scenario: str,
@@ -1170,11 +1240,18 @@ def build_copilot_system_prompt(
     interaction_locale: str,
     session_data: dict[str, Any],
     turn_intent: str,
+    *,
+    assistant_chat: bool = False,
+    preload_world_context: bool | None = None,
 ) -> str:
     novel_lang = snapshot.novel_language
     runtime_instr = _build_runtime_instruction_text(snapshot, scenario, interaction_locale)
     workbench_context = _build_workbench_context_text(snapshot, scenario, session_data, interaction_locale)
-    intent_behavior = _build_intent_behavior_text(turn_intent, interaction_locale)
+    intent_behavior = (
+        _build_assistant_chat_intent_behavior_text(turn_intent, interaction_locale)
+        if assistant_chat
+        else _build_intent_behavior_text(turn_intent, interaction_locale)
+    )
 
     if interaction_locale and interaction_locale != novel_lang:
         locale_instr = _prompt_text(
@@ -1186,10 +1263,21 @@ def build_copilot_system_prompt(
     else:
         locale_instr = _prompt_text(interaction_locale, "language_novel_rule", novel_lang=novel_lang)
 
+    if assistant_chat:
+        return _build_assistant_chat_system_prompt(
+            workbench_context=workbench_context,
+            locale_instr=locale_instr,
+            intent_behavior=intent_behavior,
+            interaction_locale=interaction_locale,
+        )
+
     world_model_text = _build_world_model_prompt_block(snapshot, interaction_locale)
     evidence_text = _format_evidence_for_prompt(evidence) or _prompt_text(interaction_locale, "no_evidence")
 
-    if not should_preload_world_context(turn_intent):
+    if preload_world_context is None:
+        preload_world_context = should_preload_world_context(turn_intent)
+
+    if not preload_world_context:
         return _prompt_template(
             interaction_locale,
             "workbench_assistant",
@@ -1375,4 +1463,78 @@ def build_tool_loop_system_prompt(
         intent_behavior=intent_behavior,
         locale_instr=locale_instr,
         workflow_hint=workflow_hint,
+    )
+
+
+def build_assistant_chat_tool_loop_system_prompt(
+    snapshot: ScopeSnapshot,
+    scenario: str,
+    interaction_locale: str,
+    session_data: dict[str, Any],
+    turn_intent: str,
+) -> str:
+    workbench_context = _build_workbench_context_text(snapshot, scenario, session_data, interaction_locale)
+    novel_lang = snapshot.novel_language
+    intent_behavior = _build_assistant_chat_intent_behavior_text(turn_intent, interaction_locale)
+
+    if interaction_locale and interaction_locale != novel_lang:
+        locale_instr = _prompt_text(
+            interaction_locale,
+            "language_interaction_rule",
+            interaction_locale=interaction_locale,
+            novel_lang=novel_lang,
+        )
+    else:
+        locale_instr = _prompt_text(interaction_locale, "language_novel_rule", novel_lang=novel_lang)
+
+    if interaction_locale == "en":
+        return (
+            'You are the app\'s persistent AI chat assistant inside the "AI Chat" area.\n\n'
+            "## Behavior for this turn\n"
+            f"{intent_behavior}\n\n"
+            "## Optional app context\n"
+            f"{workbench_context}\n"
+            "Treat the app context as optional background only. Use it when the user is asking about the current "
+            "novel, chapter, entities, relationships, settings, or drafts, but do not treat it as your scope limit.\n\n"
+            "## Tool use\n"
+            "You may use `web_search` when the answer depends on current or external information, and `fetch_url` "
+            "when you need to inspect a specific public page in more detail.\n"
+            "Use tools selectively, prefer trustworthy public sources, and never claim you checked the web unless "
+            "you actually used a tool in this turn.\n\n"
+            "## Language rules\n"
+            f"{locale_instr}\n\n"
+            "## Output format (JSON)\n"
+            "{\n"
+            '  "answer": "Natural-language answer (required)",\n'
+            '  "cited_evidence_indices": [],\n'
+            '  "suggestions": []\n'
+            "}\n\n"
+            "## Rules\n"
+            "1. This is a general-purpose chat area, so answer normal real-world questions directly\n"
+            "2. The chat is multi-turn; use earlier messages in the thread when they matter\n"
+            "3. Default to an empty suggestions array unless the user explicitly wants grounded world-model edits"
+        )
+
+    return (
+        "你是应用内“AI 对话区”的常驻通用聊天助手。\n\n"
+        "## 本轮回答原则\n"
+        f"{intent_behavior}\n\n"
+        "## 可选的应用上下文\n"
+        f"{workbench_context}\n"
+        "上面的应用上下文只是可选背景。只有当用户明确在聊当前小说、章节、实体、关系、设定或草稿时再使用它，不要把它当成能力边界。\n\n"
+        "## 工具使用\n"
+        "当问题依赖实时或外部信息时，可以使用 `web_search` 联网搜索；当需要查看某个公开网页详情时，可以使用 `fetch_url`。\n"
+        "只在必要时调用工具，优先参考可信公开来源；如果本轮没有实际调用工具，就不要声称自己已经联网核实。\n\n"
+        "## 语言规则\n"
+        f"{locale_instr}\n\n"
+        "## 输出要求（JSON）\n"
+        "{\n"
+        '  "answer": "（必填）自然语言回答",\n'
+        '  "cited_evidence_indices": [],\n'
+        '  "suggestions": []\n'
+        "}\n\n"
+        "## 规则\n"
+        "1. 这是通用对话区，现实问题、知识问答、写作、翻译、代码和日常建议都可以直接回答\n"
+        "2. 这是多轮对话，当前回答要在需要时结合前文历史消息\n"
+        "3. 默认保持 suggestions 为空；只有用户明确想修改世界模型时才考虑生成"
     )

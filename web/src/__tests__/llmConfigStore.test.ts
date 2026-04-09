@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { clearLlmConfig, getLlmConfig, setLlmConfig } from '@/lib/llmConfigStore'
+import { clearLlmConfig, getLlmConfig, initializeLlmConfig, setLlmConfig } from '@/lib/llmConfigStore'
 
 describe('llmConfigStore', () => {
   beforeEach(() => {
@@ -23,5 +23,35 @@ describe('llmConfigStore', () => {
     clearLlmConfig()
 
     expect(getLlmConfig()).toEqual({ baseUrl: '', apiKey: '', model: '' })
+  })
+
+  it('hydrates empty config fields from defaults', () => {
+    setLlmConfig({ model: 'deepseek-chat' })
+
+    expect(
+      initializeLlmConfig({
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-env',
+        model: 'gpt-5.4',
+      }),
+    ).toEqual({
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-env',
+      model: 'deepseek-chat',
+    })
+  })
+
+  it('uses defaults when no local config exists', () => {
+    expect(
+      initializeLlmConfig({
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-env',
+        model: 'gpt-5.4',
+      }),
+    ).toEqual({
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-env',
+      model: 'gpt-5.4',
+    })
   })
 })

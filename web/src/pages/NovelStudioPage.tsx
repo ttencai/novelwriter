@@ -111,9 +111,9 @@ export function NovelStudioPage() {
   const novelId = Number(novelIdParam)
   const { locale, t } = useUiLocale()
   const { routeState } = useNovelShell()
-  const { isOpen: isWorkbenchOpen, focusedSessionId, openDrawer } = useNovelCopilot()
+  const { isOpen: isWorkbenchOpen, openDrawer } = useNovelCopilot()
   const activeStage = routeState.stage ?? 'chapter'
-  const showWorkbenchRail = isWorkbenchOpen && focusedSessionId !== null
+  const showWorkbenchRail = isWorkbenchOpen
 
   const [editMode, setEditMode] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -383,9 +383,9 @@ export function NovelStudioPage() {
       !hasResultsContext
         ? null
         : liveResultsDebug
-      ?? (effectiveResultsProvenance
-        ? readGenerationResultsDebug(effectiveResultsProvenance.continuations) ?? locationState?.studioResultsDebug ?? null
-        : locationState?.studioResultsDebug ?? null)
+        ?? (effectiveResultsProvenance
+          ? readGenerationResultsDebug(effectiveResultsProvenance.continuations) ?? locationState?.studioResultsDebug ?? null
+          : locationState?.studioResultsDebug ?? null)
     ),
     [effectiveResultsProvenance, hasResultsContext, liveResultsDebug, locationState?.studioResultsDebug],
   )
@@ -734,12 +734,13 @@ export function NovelStudioPage() {
           <ArtifactStage className="flex-1 min-w-0 flex flex-col rounded-[16px] border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] backdrop-blur-[24px] shadow-[var(--nw-copilot-panel-shadow)] overflow-hidden">
             {hasResultsContext ? (
               <div className={activeStage === 'results' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
-              <ContinuationResultsStage
-                novelId={novelId}
-                activeChapterNum={activeChapterNum}
-                activeChapterReference={activeChapterReference}
-                showInjectionSummaryRail={showInjectionSummaryRail}
-                onToggleInjectionSummaryRail={() => {
+                <ContinuationResultsStage
+                  novelId={novelId}
+                  activeChapterNum={activeChapterNum}
+                  activeChapterReference={activeChapterReference}
+                  latestChapterNum={latestChapterNum}
+                  showInjectionSummaryRail={showInjectionSummaryRail}
+                  onToggleInjectionSummaryRail={() => {
                     const nextSearchParams = setNovelShellArtifactPanelSearchParams(
                       new URLSearchParams(location.search),
                       showInjectionSummaryRail ? null : injectionSummaryPanelState,
@@ -985,18 +986,18 @@ export function NovelStudioPage() {
 
                 {/* ── Editor / Reader Area ── */}
                 {editMode && activeChapterNum !== null ? (
-                    <ChapterEditor
-                      textareaRef={textareaRef}
-                      value={editorContent}
-                      onChange={handleEditorChange}
-                      onSelectionChange={handleSelectionChange}
-                      cursorInfo={cursorInfo}
-                      autoSaveStatus={autoSaveStatus}
-                      onUndo={handleUndo}
-                      onRedo={handleRedo}
-                      onCancel={handleCancelEdit}
-                      onSave={handleSave}
-                      warningTerms={editorWarningTerms}
+                  <ChapterEditor
+                    textareaRef={textareaRef}
+                    value={editorContent}
+                    onChange={handleEditorChange}
+                    onSelectionChange={handleSelectionChange}
+                    cursorInfo={cursorInfo}
+                    autoSaveStatus={autoSaveStatus}
+                    onUndo={handleUndo}
+                    onRedo={handleRedo}
+                    onCancel={handleCancelEdit}
+                    onSave={handleSave}
+                    warningTerms={editorWarningTerms}
                   />
                 ) : (
                   <ChapterContent

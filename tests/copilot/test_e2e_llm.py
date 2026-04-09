@@ -198,7 +198,7 @@ async def _run_copilot(db, novel, mode, scope, context, prompt, locale="zh"):
     from app.config import reload_settings
     import app.database as db_mod
 
-    session, _ = open_or_reuse_session(db, novel.id, 1, mode, scope, context, locale, "")
+    session, _ = open_or_reuse_session(db, novel.id, 1, mode, scope, context, locale, "copilot_drawer", "")
     run = create_run(db, session, 1, prompt)
 
     settings = reload_settings()  # Fresh load to get .env values

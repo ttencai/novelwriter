@@ -137,6 +137,14 @@ export function ContinuationSetupStage({
               )
             })}
           </div>
+          <input
+            type="number"
+            min={1}
+            step={100}
+            value={selectedLength}
+            onChange={(e) => onSelectedLengthChange(e.target.value)}
+            className="h-10 w-full rounded-lg border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] px-3 text-sm font-mono text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          />
         </div>
 
         {/* Advanced Toggle */}
@@ -162,7 +170,7 @@ export function ContinuationSetupStage({
         >
           <div className="overflow-hidden">
             <GlassCard className="rounded-xl p-4 flex flex-col gap-4">
-              <AdvancedRow label={t('continuation.setup.contextChapters')} desc="1–5" value={contextChapters} onChange={onContextChaptersChange} type="number" min={1} max={5} step={1} />
+              <AdvancedRow label={t('continuation.setup.contextChapters')} desc="≥1" value={contextChapters} onChange={onContextChaptersChange} type="number" min={1} step={1} />
               <AdvancedRow label={t('continuation.setup.numVersions')} desc="1–2" value={numVersions} onChange={onNumVersionsChange} type="number" min={1} max={2} step={1} />
               <AdvancedRow label={t('continuation.setup.temperature')} desc="0.0–2.0" value={temperature} onChange={onTemperatureChange} type="number" min={0} max={2} step={0.1} />
             </GlassCard>

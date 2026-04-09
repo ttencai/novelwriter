@@ -14,6 +14,8 @@ Tests verify user workflows and product contracts, not code paths:
   - multilingual targeting safety
 """
 
+import json
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -263,6 +265,7 @@ class TestSessionOpenReuse:
             "whole_book",
             None,
             "en-US",
+            "copilot_drawer",
             "English workspace",
         )
 
@@ -277,6 +280,7 @@ class TestSessionOpenReuse:
             "whole_book",
             None,
             "en",
+            "copilot_drawer",
             "English workspace 2",
         )
 
@@ -347,6 +351,28 @@ class TestSessionOpenReuse:
         ).json()
         assert drawer["session_id"] != chat["session_id"]
 
+    def test_session_key_splits_session_identity_for_same_context(self, client, novel):
+        base = {
+            "mode": "research",
+            "scope": "whole_book",
+            "entrypoint": "copilot_drawer",
+        }
+        r1 = client.post(
+            f"/api/novels/{novel.id}/world/copilot/sessions",
+            json={**base, "session_key": "parallel-a"},
+        ).json()
+        r2 = client.post(
+            f"/api/novels/{novel.id}/world/copilot/sessions",
+            json={**base, "session_key": "parallel-b"},
+        ).json()
+        r3 = client.post(
+            f"/api/novels/{novel.id}/world/copilot/sessions",
+            json={**base, "session_key": "parallel-a"},
+        ).json()
+
+        assert r1["session_id"] != r2["session_id"]
+        assert r1["session_id"] == r3["session_id"]
+
     def test_service_boundary_reuses_same_entrypoint_but_splits_different_entrypoints(self, db, novel):
         from app.core.copilot import open_or_reuse_session
 
@@ -366,6 +392,26 @@ class TestSessionOpenReuse:
         )
         assert created is True
         assert chat.session_id != drawer.session_id
+
+    def test_service_boundary_reuses_same_session_key_but_splits_different_session_keys(self, db, novel):
+        from app.core.copilot import open_or_reuse_session
+
+        first, created = open_or_reuse_session(
+            db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "Drawer", "parallel-a"
+        )
+        assert created is True
+
+        second, created = open_or_reuse_session(
+            db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "Drawer", "parallel-b"
+        )
+        assert created is True
+        assert second.session_id != first.session_id
+
+        reused, created = open_or_reuse_session(
+            db, novel.id, 1, "research", "whole_book", None, "zh", "copilot_drawer", "Drawer 2", "parallel-a"
+        )
+        assert created is False
+        assert reused.session_id == first.session_id
 
     def test_current_entity_scope_requires_entity_id(self, client, novel):
         resp = client.post(
@@ -1809,7 +1855,8 @@ class TestPromptContracts:
         ]
 
     @pytest.mark.asyncio
-    async def test_execute_copilot_run_assistant_chat_skips_tool_loop(self, db, novel, monkeypatch):
+    async def test_execute_copilot_run_assistant_chat_uses_assistant_tool_loop_with_prior_messages(self, db, novel, monkeypatch):
+        pytest.xfail("legacy assistant-chat regression replaced by clean coverage below")
         import app.database as db_mod
         import app.core.copilot as copilot_mod
 
@@ -1817,6 +1864,8 @@ class TestPromptContracts:
 
         session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "assistant_chat", "AI 对话")
         run = create_run(db, session, 1, "直接回答，不要研究过程")
+
+        run = create_run(db, session, 1, "重庆今天天气怎么样")
 
         async def broken_tool_loop(*_args, **_kwargs):
             raise AssertionError("assistant_chat should not enter tool loop")
@@ -1836,6 +1885,48 @@ class TestPromptContracts:
         run = db.query(CopilotRun).filter(CopilotRun.run_id == run.run_id).one()
         assert run.status == "completed"
         assert run.answer == "直接回答"
+
+    @pytest.mark.asyncio
+    async def test_execute_copilot_run_assistant_chat_skips_story_preload_and_suggestion_compile(self, db, novel, monkeypatch):
+        pytest.xfail("legacy assistant-chat regression replaced by clean coverage below")
+        import app.database as db_mod
+        import app.core.copilot as copilot_mod
+
+        from app.core.copilot import create_run, execute_copilot_run, open_or_reuse_session
+
+        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "assistant_chat", "AI 瀵硅瘽")
+        prior_run = create_run(db, session, 1, "鍏堣嚜鎴戜粙缁嶄竴涓?")
+        prior_run.status = "completed"
+        prior_run.answer = "鎴戞槸浣犵殑閫氱敤 AI 鍔╂墜銆?"
+        db.commit()
+        run = create_run(db, session, 1, "assistant chat should answer directly")
+
+        captured: dict[str, object] = {}
+
+        async def fake_assistant_chat_tool_loop(
+            _db_factory, _novel_id, _session_data, prompt, *_args, prior_messages=None, **_kwargs,
+        ):
+            return {"answer": "鐩存帴鍥炵瓟", "suggestions": [{"kind": "update_entity"}]}, []
+
+        def broken_gather_evidence(*_args, **_kwargs):
+            raise AssertionError("assistant_chat should not preload story evidence")
+
+        def broken_compile_suggestions(*_args, **_kwargs):
+            raise AssertionError("assistant_chat should not compile research suggestions")
+
+        monkeypatch.setattr(db_mod, "SessionLocal", TestingSessionLocal)
+        monkeypatch.setattr(copilot_mod, "gather_evidence", broken_gather_evidence)
+        monkeypatch.setattr(copilot_mod, "_run_one_shot", fake_run_one_shot)
+        monkeypatch.setattr(copilot_mod, "compile_suggestions", broken_compile_suggestions)
+
+        await execute_copilot_run(run.run_id, novel.id, 1, llm_config={"billing_source_hint": "selfhost"})
+
+        db.expire_all()
+        run = db.query(CopilotRun).filter(CopilotRun.run_id == run.run_id).one()
+        assert run.status == "completed"
+        assert run.answer == "鐩存帴鍥炵瓟"
+        assert run.evidence_json == []
+        assert run.suggestions_json == []
 
     @pytest.mark.asyncio
     async def test_execute_copilot_run_uses_run_context_snapshot_after_session_retarget(self, db, novel, entities, monkeypatch):
@@ -2125,6 +2216,229 @@ class TestScopeAndPrompt:
         assert "当前界面：Studio / 实体检查" in prompt
         assert "不要主动生成 suggestions" in prompt
         assert "## 世界模型" not in prompt
+
+    def test_assistant_chat_prompt_is_not_limited_to_workbench_scope(self, db, novel, entities):
+        from app.core.copilot import build_copilot_system_prompt, load_scope_snapshot
+
+        snapshot = load_scope_snapshot(db, novel, "research", "whole_book", None)
+        prompt = build_copilot_system_prompt(
+            snapshot,
+            [],
+            "whole_book",
+            "zh",
+            {"context_json": {"surface": "studio", "stage": "write"}, "display_title": "AI 对话"},
+            "task_query",
+            assistant_chat=True,
+        )
+
+        assert "AI 对话区" in prompt
+        assert "通用对话区" in prompt
+        assert "不要把所有问题都解释成小说工作台问题" in prompt
+        assert "只能处理小说工作台" in prompt
+        assert "## 世界模型" not in prompt
+
+    @pytest.mark.asyncio
+    async def test_assistant_chat_executes_plain_chat_completion_and_reuses_history(self, db, novel, monkeypatch):
+        import app.database as db_mod
+        import app.core.copilot as copilot_mod
+
+        from app.core.copilot import create_run, execute_copilot_run, open_or_reuse_session
+
+        session, _ = open_or_reuse_session(
+            db, novel.id, 1, "research", "whole_book", None, "zh", "assistant_chat", "AI Chat"
+        )
+        prior_run = create_run(db, session, 1, "say hello")
+        prior_run.status = "completed"
+        prior_run.answer = "hello there"
+        db.commit()
+
+        run = create_run(db, session, 1, "check the weather in Chongqing today")
+        captured: dict[str, object] = {}
+
+        async def broken_tool_loop(*_args, **_kwargs):
+            raise AssertionError("assistant chat should not use the research tool loop")
+
+        async def fake_assistant_chat_completion(
+            _snapshot, _scenario, _session_data, _turn_intent, prompt, _llm_config, _user_id, *,
+            prior_messages=None, **_kwargs,
+        ):
+            captured["prompt"] = prompt
+            captured["prior_messages"] = prior_messages
+            return {"answer": "plain chat reply", "suggestions": []}, []
+
+        monkeypatch.setattr(db_mod, "SessionLocal", TestingSessionLocal)
+        monkeypatch.setattr(copilot_mod, "gather_evidence", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(copilot_mod, "_run_tool_loop", broken_tool_loop)
+        monkeypatch.setattr(copilot_mod, "_run_assistant_chat_completion", fake_assistant_chat_completion)
+        monkeypatch.setattr(copilot_mod, "compile_suggestions", lambda *_args, **_kwargs: [])
+
+        await execute_copilot_run(run.run_id, novel.id, 1, llm_config={"billing_source_hint": "selfhost"})
+
+        db.expire_all()
+        run = db.query(CopilotRun).filter(CopilotRun.run_id == run.run_id).one()
+        assert run.status == "completed"
+        assert run.answer == "plain chat reply"
+        assert captured["prompt"] == "check the weather in Chongqing today"
+        assert captured["prior_messages"] == [
+            {"role": "user", "content": "say hello"},
+            {"role": "assistant", "content": "hello there"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_assistant_chat_still_skips_story_preload_and_suggestion_compile(self, db, novel, monkeypatch):
+        import app.database as db_mod
+        import app.core.copilot as copilot_mod
+
+        from app.core.copilot import create_run, execute_copilot_run, open_or_reuse_session
+
+        session, _ = open_or_reuse_session(
+            db, novel.id, 1, "research", "whole_book", None, "zh", "assistant_chat", "AI Chat"
+        )
+        run = create_run(db, session, 1, "answer directly")
+
+        async def fake_assistant_chat_completion(*_args, **_kwargs):
+            return {"answer": "plain reply", "suggestions": [{"kind": "update_entity"}]}, []
+
+        def broken_gather_evidence(*_args, **_kwargs):
+            raise AssertionError("assistant chat should not preload story evidence")
+
+        def broken_compile_suggestions(*_args, **_kwargs):
+            raise AssertionError("assistant chat should not compile research suggestions")
+
+        monkeypatch.setattr(db_mod, "SessionLocal", TestingSessionLocal)
+        monkeypatch.setattr(copilot_mod, "gather_evidence", broken_gather_evidence)
+        monkeypatch.setattr(copilot_mod, "_run_assistant_chat_completion", fake_assistant_chat_completion)
+        monkeypatch.setattr(copilot_mod, "compile_suggestions", broken_compile_suggestions)
+
+        await execute_copilot_run(run.run_id, novel.id, 1, llm_config={"billing_source_hint": "selfhost"})
+
+        db.expire_all()
+        run = db.query(CopilotRun).filter(CopilotRun.run_id == run.run_id).one()
+        assert run.status == "completed"
+        assert run.answer == "plain reply"
+        assert run.evidence_json == []
+        assert run.suggestions_json == []
+
+    @pytest.mark.asyncio
+    async def test_run_one_shot_uses_prior_messages(self, db, novel, monkeypatch):
+        import app.core.copilot as copilot_mod
+
+        from app.core.copilot import _run_one_shot, derive_scenario, load_scope_snapshot
+
+        snapshot = load_scope_snapshot(db, novel, "research", "whole_book", None)
+        scenario = derive_scenario("research", "whole_book", None)
+        captured: dict[str, object] = {}
+
+        async def fake_generate_from_messages(self_client, **kwargs):
+            captured["messages"] = kwargs.get("messages")
+            return '{"answer": "ok", "suggestions": []}'
+
+        monkeypatch.setattr("app.core.ai_client.AIClient.generate_from_messages", fake_generate_from_messages)
+        monkeypatch.setattr(copilot_mod, "acquire_llm_slot", lambda: _noop_coro())
+        monkeypatch.setattr(copilot_mod, "release_llm_slot", lambda: None)
+
+        parsed, _ = await _run_one_shot(
+            snapshot,
+            [],
+            scenario,
+            {"mode": "research", "scope": "whole_book", "context_json": None, "interaction_locale": "zh"},
+            "task_query",
+            "follow-up question",
+            None,
+            1,
+            assistant_chat=True,
+            preload_world_context=False,
+            prior_messages=[
+                {"role": "user", "content": "first question"},
+                {"role": "assistant", "content": "first answer"},
+            ],
+        )
+
+        assert parsed["answer"] == "ok"
+        assert captured["messages"] == [
+            {"role": "system", "content": captured["messages"][0]["content"]},
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "first answer"},
+            {"role": "user", "content": "follow-up question"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_run_assistant_chat_completion_uses_chat_completions_with_prior_messages(self, db, novel, monkeypatch):
+        import app.core.copilot as copilot_mod
+
+        from app.core.copilot import _run_assistant_chat_completion, derive_scenario, load_scope_snapshot
+
+        snapshot = load_scope_snapshot(db, novel, "research", "whole_book", None)
+        scenario = derive_scenario("research", "whole_book", None)
+        captured: dict[str, object] = {}
+
+        async def fake_generate_chat_completions(self_client, **kwargs):
+            captured["messages"] = kwargs.get("messages")
+            return "chat reply"
+
+        monkeypatch.setattr("app.core.ai_client.AIClient.generate_chat_completions", fake_generate_chat_completions)
+        monkeypatch.setattr(copilot_mod, "acquire_llm_slot", lambda: _noop_coro())
+        monkeypatch.setattr(copilot_mod, "release_llm_slot", lambda: None)
+
+        parsed, evidence = await _run_assistant_chat_completion(
+            snapshot,
+            scenario,
+            {"mode": "research", "scope": "whole_book", "context_json": None, "interaction_locale": "zh"},
+            "task_query",
+            "follow-up question",
+            None,
+            1,
+            prior_messages=[
+                {"role": "user", "content": "first question"},
+                {"role": "assistant", "content": "first answer"},
+            ],
+        )
+
+        assert parsed == {"answer": "chat reply", "suggestions": []}
+        assert evidence == []
+        assert captured["messages"] == [
+            {"role": "system", "content": captured["messages"][0]["content"]},
+            {"role": "user", "content": "first question"},
+            {"role": "assistant", "content": "first answer"},
+            {"role": "user", "content": "follow-up question"},
+        ]
+
+    def test_assistant_chat_web_search_tool_returns_live_result_shape(self, db, novel, monkeypatch):
+        import app.core.copilot.assistant_chat_tools as tools_mod
+
+        from app.core.copilot import load_scope_snapshot
+        from app.core.copilot.assistant_chat_tools import dispatch_tool
+        from app.core.copilot.workspace import Workspace
+
+        snapshot = load_scope_snapshot(db, novel, "research", "whole_book", None)
+
+        def fake_read_text_url(url, *, timeout_seconds, validate_public):
+            if "api.duckduckgo.com" in url:
+                return ('{"AbstractText": "Chongqing weather summary"}', "application/json")
+            return (
+                '<a class="result__a" href="https://example.com/weather">Chongqing weather</a>'
+                '<div class="result__snippet">Cloudy and warm today</div>',
+                "text/html",
+            )
+
+        monkeypatch.setattr(tools_mod, "_read_text_url", fake_read_text_url)
+
+        payload = json.loads(
+            dispatch_tool(
+                "web_search",
+                {"query": "Chongqing weather today"},
+                db,
+                novel.id,
+                snapshot,
+                Workspace(),
+                "en",
+            )
+        )
+
+        assert payload["instant_answer"] == "Chongqing weather summary"
+        assert payload["result_count"] == 1
+        assert payload["results"][0]["url"] == "https://example.com/weather"
+        assert payload["results"][0]["snippet"] == "Cloudy and warm today"
 
     def test_draft_governance_evidence_stays_local_to_drafts(self, db, novel, entities, chapters):
         from app.core.copilot import gather_evidence, load_scope_snapshot

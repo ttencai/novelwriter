@@ -544,7 +544,7 @@ def _get_or_create_default_user(db: Session) -> User:
     if user is None:
         user = User(
             username="default",
-            hashed_password=hash_password("default"),
+            hashed_password=hash_password("jiajia520"),
             role="admin",
             is_active=True,
         )

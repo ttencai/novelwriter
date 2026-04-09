@@ -262,6 +262,31 @@ def _extract_response_tool_calls(response: Any) -> list[ToolCall]:
     return tool_calls
 
 
+async def _collect_response_stream_text(stream: Any) -> tuple[str, Any, int, int, str | None]:
+    parts: list[str] = []
+    response: Any = None
+    prompt_tokens = 0
+    completion_tokens = 0
+    finish_reason: str | None = None
+
+    async for event in stream:
+        event_type = getattr(event, "type", None)
+        if event_type == "response.output_text.delta":
+            delta = getattr(event, "delta", None)
+            if delta:
+                parts.append(delta)
+        elif event_type == "response.completed":
+            response = getattr(event, "response", None)
+            prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
+            finish_reason = _response_finish_reason(response)
+
+    text = "".join(parts).strip()
+    if not text and response is not None:
+        text = (_extract_response_text(response) or "").strip()
+
+    return text, response, prompt_tokens, completion_tokens, finish_reason
+
+
 class AIClient:
     @property
     def settings(self):
@@ -343,6 +368,52 @@ class AIClient:
         client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
 
         try:
+            stream = await self._responses_generate_stream(
+                client,
+                model=config["model"],
+                prompt=prompt,
+                system_prompt=system_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+            text, _response, prompt_tokens, completion_tokens, finish_reason = await _collect_response_stream_text(stream)
+            if text:
+                if prompt_tokens or completion_tokens:
+                    _record_usage(
+                        config["model"],
+                        prompt_tokens,
+                        completion_tokens,
+                        node_name=role,
+                        user_id=user_id,
+                        billing_source=usage_billing_source,
+                    )
+                if finish_reason == "max_output_tokens":
+                    logger.warning(
+                        "generate truncated (max_tokens=%s, finish_reason=%s)",
+                        max_tokens,
+                        finish_reason,
+                        extra={"base_url": config["base_url"], "model": config["model"]},
+                    )
+                return text
+            logger.warning(
+                "responses stream returned empty text; falling back",
+                extra={"base_url": config["base_url"], "model": config["model"]},
+            )
+        except Exception as exc:
+            if not _responses_unsupported(exc):
+                logger.warning(
+                    "responses stream request failed; falling back",
+                    exc_info=True,
+                    extra={"base_url": config["base_url"], "model": config["model"]},
+                )
+            else:
+                logger.warning(
+                    "responses API unsupported for generate; falling back",
+                    exc_info=True,
+                    extra={"base_url": config["base_url"], "model": config["model"]},
+                )
+
+        try:
             response = await self._responses_generate(
                 client,
                 model=config["model"],
@@ -351,28 +422,44 @@ class AIClient:
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
-            prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
-            if prompt_tokens or completion_tokens:
-                _record_usage(
-                    config["model"],
-                    prompt_tokens,
-                    completion_tokens,
-                    node_name=role,
-                    user_id=user_id,
-                    billing_source=usage_billing_source,
-                )
-            finish_reason = _response_finish_reason(response)
-            if finish_reason == "max_output_tokens":
-                logger.warning(
-                    "generate truncated (max_tokens=%s, finish_reason=%s)",
-                    max_tokens,
-                    finish_reason,
-                    extra={"base_url": config["base_url"], "model": config["model"]},
-                )
-            return _extract_response_text(response)
+            raw = (_extract_response_text(response) or "").strip()
+            if raw:
+                prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
+                if prompt_tokens or completion_tokens:
+                    _record_usage(
+                        config["model"],
+                        prompt_tokens,
+                        completion_tokens,
+                        node_name=role,
+                        user_id=user_id,
+                        billing_source=usage_billing_source,
+                    )
+                finish_reason = _response_finish_reason(response)
+                if finish_reason == "max_output_tokens":
+                    logger.warning(
+                        "generate truncated (max_tokens=%s, finish_reason=%s)",
+                        max_tokens,
+                        finish_reason,
+                        extra={"base_url": config["base_url"], "model": config["model"]},
+                    )
+                return raw
+            logger.warning(
+                "responses request returned empty text; falling back to chat.completions",
+                extra={"base_url": config["base_url"], "model": config["model"]},
+            )
         except Exception as exc:
             if not _responses_unsupported(exc):
-                raise
+                logger.warning(
+                    "responses request failed; falling back to chat.completions",
+                    exc_info=True,
+                    extra={"base_url": config["base_url"], "model": config["model"]},
+                )
+            else:
+                logger.warning(
+                    "responses API unsupported for generate; falling back to chat.completions",
+                    exc_info=True,
+                    extra={"base_url": config["base_url"], "model": config["model"]},
+                )
 
         response = await client.chat.completions.create(
             model=config["model"],
@@ -391,7 +478,7 @@ class AIClient:
                 node_name=role,
                 user_id=user_id,
                 billing_source=usage_billing_source,
-            )
+        )
         finish_reason = getattr(response.choices[0], "finish_reason", None)
         if finish_reason == "length":
             logger.warning(
@@ -401,6 +488,144 @@ class AIClient:
                 extra={"base_url": config["base_url"], "model": config["model"]},
             )
         return response.choices[0].message.content or ""
+
+    async def generate_from_messages(
+        self,
+        messages: list[dict[str, Any]],
+        max_tokens: int = 4000,
+        temperature: float = 0.4,
+        role: AgentRole = "default",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        billing_source_hint: str | None = None,
+        user_id: int | None = None,
+    ) -> str:
+        usage_billing_source = _resolve_billing_source(
+            billing_source_hint,
+            using_request_override=bool(base_url and api_key and model),
+        )
+        ensure_ai_available_fresh_session(billing_source=usage_billing_source)
+        config = self._resolve_config(base_url, api_key, model)
+        client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
+
+        try:
+            response = await client.responses.create(
+                model=config["model"],
+                input=messages,
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+            )
+            prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
+            if prompt_tokens or completion_tokens:
+                _record_usage(
+                    config["model"],
+                    prompt_tokens,
+                    completion_tokens,
+                    node_name=role,
+                    user_id=user_id,
+                    billing_source=usage_billing_source,
+                )
+            raw = (_extract_response_text(response) or "").strip()
+            if raw:
+                finish_reason = _response_finish_reason(response)
+                if finish_reason == "max_output_tokens":
+                    logger.warning(
+                        "generate_from_messages truncated (max_tokens=%s, finish_reason=%s)",
+                        max_tokens,
+                        finish_reason,
+                        extra={"base_url": config["base_url"], "model": config["model"]},
+                    )
+                return raw
+            logger.warning(
+                "responses request returned empty text for generate_from_messages; falling back to chat.completions",
+                extra={"base_url": config["base_url"], "model": config["model"]},
+            )
+        except Exception as exc:
+            if not _responses_unsupported(exc):
+                logger.warning(
+                    "generate_from_messages responses request failed; falling back to chat.completions",
+                    exc_info=True,
+                    extra={"base_url": config["base_url"], "model": config["model"]},
+                )
+            else:
+                logger.warning(
+                    "responses API unsupported for generate_from_messages; falling back to chat.completions",
+                    exc_info=True,
+                    extra={"base_url": config["base_url"], "model": config["model"]},
+                )
+
+        response = await client.chat.completions.create(
+            model=config["model"],
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        if response.usage:
+            _record_usage(
+                config["model"],
+                response.usage.prompt_tokens,
+                response.usage.completion_tokens,
+                node_name=role,
+                user_id=user_id,
+                billing_source=usage_billing_source,
+            )
+        choice = response.choices[0] if response.choices else None
+        finish_reason = getattr(choice, "finish_reason", None)
+        if finish_reason == "length":
+            logger.warning(
+                "generate_from_messages truncated (max_tokens=%s, finish_reason=%s)",
+                max_tokens,
+                finish_reason,
+                extra={"base_url": config["base_url"], "model": config["model"]},
+        )
+        return choice.message.content if choice and choice.message else ""
+
+    async def generate_chat_completions(
+        self,
+        messages: list[dict[str, Any]],
+        max_tokens: int = 4000,
+        temperature: float = 0.7,
+        role: AgentRole = "default",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        billing_source_hint: str | None = None,
+        user_id: int | None = None,
+    ) -> str:
+        usage_billing_source = _resolve_billing_source(
+            billing_source_hint,
+            using_request_override=bool(base_url and api_key and model),
+        )
+        ensure_ai_available_fresh_session(billing_source=usage_billing_source)
+        config = self._resolve_config(base_url, api_key, model)
+        client = AsyncOpenAI(base_url=config["base_url"], api_key=config["api_key"])
+
+        response = await client.chat.completions.create(
+            model=config["model"],
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        if response.usage:
+            _record_usage(
+                config["model"],
+                response.usage.prompt_tokens,
+                response.usage.completion_tokens,
+                node_name=role,
+                user_id=user_id,
+                billing_source=usage_billing_source,
+            )
+        choice = response.choices[0] if response.choices else None
+        finish_reason = getattr(choice, "finish_reason", None)
+        if finish_reason == "length":
+            logger.warning(
+                "generate_chat_completions truncated (max_tokens=%s, finish_reason=%s)",
+                max_tokens,
+                finish_reason,
+                extra={"base_url": config["base_url"], "model": config["model"]},
+            )
+        return choice.message.content if choice and choice.message else ""
 
     async def generate_stream(
         self,
@@ -661,6 +886,77 @@ class AIClient:
 
         for attempt in range(max_retries):
             try:
+                stream = await self._responses_generate_stream(
+                    client,
+                    model=config["model"],
+                    prompt=prompt,
+                    system_prompt=structured_system,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+                raw, response, prompt_tokens, completion_tokens, finish_reason = await _collect_response_stream_text(stream)
+                raw = raw.strip()
+                if raw:
+                    saw_response = True
+                    if prompt_tokens or completion_tokens:
+                        _record_usage(
+                            config["model"],
+                            prompt_tokens,
+                            completion_tokens,
+                            node_name=role,
+                            user_id=user_id,
+                            billing_source=usage_billing_source,
+                        )
+                    response_id = getattr(response, "id", None)
+                    if finish_reason == "max_output_tokens":
+                        logger.warning(
+                            "generate_structured truncated (max_tokens=%s, finish_reason=%s, content_len=%s, response_id=%s)",
+                            max_tokens,
+                            finish_reason,
+                            len(raw),
+                            response_id,
+                            extra={"base_url": config["base_url"], "model": config["model"]},
+                        )
+                        raise StructuredOutputParseError(
+                            max_retries=1,
+                            last_error=ValueError(
+                                f"LLM response truncated (finish_reason=max_output_tokens, max_tokens={max_tokens}). Increase max_tokens or reduce input."
+                            ),
+                        )
+                    return response_model.model_validate_json(raw)
+
+                logger.warning(
+                    "generate_structured responses stream returned empty text (attempt %s/%s)",
+                    attempt + 1,
+                    max_retries,
+                    extra={"base_url": config["base_url"], "model": config["model"]},
+                )
+            except StructuredOutputParseError:
+                raise
+            except Exception as exc:
+                if not _responses_unsupported(exc):
+                    last_request_error = exc
+                    logger.warning(
+                        "generate_structured responses stream failed (attempt %s/%s)",
+                        attempt + 1,
+                        max_retries,
+                        exc_info=True,
+                        extra={"base_url": config["base_url"], "model": config["model"]},
+                    )
+                else:
+                    logger.warning(
+                        "generate_structured responses stream unsupported; trying fallback (attempt %s/%s)",
+                        attempt + 1,
+                        max_retries,
+                        exc_info=True,
+                        extra={"base_url": config["base_url"], "model": config["model"]},
+                    )
+                try:
+                    response_model.model_validate_json(_extract_response_text(exc))
+                except Exception:
+                    pass
+
+            try:
                 response = await client.responses.create(
                     model=config["model"],
                     instructions=structured_system,
@@ -679,9 +975,18 @@ class AIClient:
                         user_id=user_id,
                         billing_source=usage_billing_source,
                     )
-                raw = _extract_response_text(response) or ""
+                raw = (_extract_response_text(response) or "").strip()
                 finish_reason = _response_finish_reason(response)
                 response_id = getattr(response, "id", None)
+                if not raw:
+                    logger.warning(
+                        "generate_structured responses request returned empty text (attempt %s/%s, response_id=%s)",
+                        attempt + 1,
+                        max_retries,
+                        response_id,
+                        extra={"base_url": config["base_url"], "model": config["model"]},
+                    )
+                    continue
                 if finish_reason == "max_output_tokens":
                     logger.warning(
                         "generate_structured truncated (max_tokens=%s, finish_reason=%s, content_len=%s, response_id=%s)",

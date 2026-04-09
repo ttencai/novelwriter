@@ -36,6 +36,7 @@ export function ContinuationResultsStage({
   novelId,
   activeChapterNum,
   activeChapterReference,
+  latestChapterNum,
   showInjectionSummaryRail,
   onToggleInjectionSummaryRail,
   onDebugChange,
@@ -43,6 +44,7 @@ export function ContinuationResultsStage({
   novelId: number
   activeChapterNum: number | null
   activeChapterReference?: string | null
+  latestChapterNum: number | null
   showInjectionSummaryRail: boolean
   onToggleInjectionSummaryRail: () => void
   onDebugChange: (debug: ContinueDebugSummary | null) => void
@@ -70,9 +72,9 @@ export function ContinuationResultsStage({
 
   const initialStreamRef = useRef<
     | {
-        novelId: number
-        params: ContinueRequest
-      }
+      novelId: number
+      params: ContinueRequest
+    }
     | null
     | undefined
   >(undefined)
@@ -194,12 +196,12 @@ export function ContinuationResultsStage({
               setVariants((prev) => prev.map((variant, index) => (
                 index === event.variant
                   ? {
-                      ...variant,
-                      content: event.content ?? variant.content,
-                      continuationId: event.continuation_id,
-                      isStreaming: false,
-                      error: null,
-                    }
+                    ...variant,
+                    content: event.content ?? variant.content,
+                    continuationId: event.continuation_id,
+                    isStreaming: false,
+                    error: null,
+                  }
                   : variant
               )))
               break
@@ -318,10 +320,10 @@ export function ContinuationResultsStage({
   const debug = isStreamMode ? streamDebug : legacyResponse?.debug ?? persistedDebug ?? state?.studioResultsDebug ?? null
   const summary = debug
     ? {
-        entities: debug.injected_entities.length,
-        relationships: debug.injected_relationships.length,
-        systems: debug.injected_systems.length,
-      }
+      entities: debug.injected_entities.length,
+      relationships: debug.injected_relationships.length,
+      systems: debug.injected_systems.length,
+    }
     : null
 
   useEffect(() => {
@@ -331,21 +333,21 @@ export function ContinuationResultsStage({
   const handleAdopt = useCallback(() => {
     if (!currentContent) return
     createChapter.mutate(
-      { content: currentContent },
+      { content: currentContent, chapter_number: (latestChapterNum ?? 0) + 1 },
       {
         onSuccess: (chapter) => {
-      const currentDebug = isStreamMode ? streamDebug : legacyResponse?.debug ?? persistedDebug ?? state?.studioResultsDebug ?? null
-      const allWarnings = currentDebug?.drift_warnings ?? (reloadedWarnings.length > 0 ? reloadedWarnings : undefined)
-      if (allWarnings?.length) {
-        const targetVersion = activeTab + 1
-        const activeWarnings = allWarnings.filter(
-          (warning) => (warning.version == null || warning.version === targetVersion) && !whitelist.includes(warning.term),
-        )
-        if (activeWarnings.length > 0) {
-          setActiveWarnings(novelId, chapter.chapter_number, activeWarnings, chapter.created_at)
-        }
-      }
-      navigate(`/novel/${novelId}?chapter=${chapter.chapter_number}`, { state: null })
+          const currentDebug = isStreamMode ? streamDebug : legacyResponse?.debug ?? persistedDebug ?? state?.studioResultsDebug ?? null
+          const allWarnings = currentDebug?.drift_warnings ?? (reloadedWarnings.length > 0 ? reloadedWarnings : undefined)
+          if (allWarnings?.length) {
+            const targetVersion = activeTab + 1
+            const activeWarnings = allWarnings.filter(
+              (warning) => (warning.version == null || warning.version === targetVersion) && !whitelist.includes(warning.term),
+            )
+            if (activeWarnings.length > 0) {
+              setActiveWarnings(novelId, chapter.chapter_number, activeWarnings, chapter.created_at)
+            }
+          }
+          navigate(`/novel/${novelId}?chapter=${chapter.chapter_number}`, { state: null })
         },
       },
     )
@@ -354,6 +356,7 @@ export function ContinuationResultsStage({
     createChapter,
     currentContent,
     isStreamMode,
+    latestChapterNum,
     legacyResponse?.debug,
     navigate,
     novelId,
@@ -521,7 +524,7 @@ export function ContinuationResultsStage({
                   {t('continuation.results.badge')}
                 </span>
                 {activeChapterNum !== null ? (
-                <span className="inline-flex items-center rounded-full border border-[var(--nw-glass-border)] bg-background/20 px-2.5 py-1 text-[11px] text-muted-foreground">
+                  <span className="inline-flex items-center rounded-full border border-[var(--nw-glass-border)] bg-background/20 px-2.5 py-1 text-[11px] text-muted-foreground">
                     {t('continuation.results.continuationOf', { chapter: activeChapterReference ?? `Ch. ${activeChapterNum}` })}
                   </span>
                 ) : null}

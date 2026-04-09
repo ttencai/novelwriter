@@ -67,11 +67,7 @@ vi.mock('@/components/generation/DriftWarningPopover', () => ({
 }))
 
 vi.mock('@/components/studio/StudioAssistantPanel', () => ({
-  StudioAssistantPanel: () => (
-    <div data-testid="studio-assistant">
-      <div data-testid="novel-assistant-chat-panel">AI 对话区</div>
-    </div>
-  ),
+  StudioAssistantPanel: () => <div data-testid="studio-assistant" />,
 }))
 
 vi.mock('@/components/studio/panels/InjectionSummaryPanel', () => ({
@@ -603,14 +599,13 @@ describe('NovelStudioPage', () => {
     expect(screen.getByText('Chapters')).toBeInTheDocument()
   })
 
-  it('shows the assistant chat inside the studio rail when no copilot drawer session is focused', async () => {
+  it('shows the studio assistant rail when no copilot drawer session is focused', async () => {
     renderWithStudioShell('/novel/7?chapter=3')
 
     await waitFor(() => {
       expect(screen.getByTestId('studio-assistant')).toBeInTheDocument()
     })
 
-    expect(screen.getByTestId('novel-assistant-chat-panel')).toBeInTheDocument()
     expect(screen.queryByTestId('novel-copilot-drawer')).not.toBeInTheDocument()
   })
 })

@@ -9,26 +9,46 @@ export function NovelCopilotComposer({
   disabled = false,
   label,
   placeholder,
+  value,
+  onValueChange,
+  focusSignal,
 }: {
   onSubmit: (text: string) => void
   disabled?: boolean
   label?: string
   placeholder?: string
+  value?: string
+  onValueChange?: (value: string) => void
+  focusSignal?: number
 }) {
   const { t } = useUiLocale()
-  const [value, setValue] = useState('')
+  const [internalValue, setInternalValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const resolvedLabel = label ?? t('copilot.composer.defaultLabel')
   const resolvedPlaceholder = placeholder ?? t('copilot.composer.defaultPlaceholder')
+  const resolvedValue = value ?? internalValue
+
+  const updateValue = (nextValue: string) => {
+    if (onValueChange) {
+      onValueChange(nextValue)
+      return
+    }
+    setInternalValue(nextValue)
+  }
+
+  const submitValue = () => {
+    if (disabled) return
+    const trimmed = resolvedValue.trim()
+    if (!trimmed) return
+    onSubmit(trimmed)
+    updateValue('')
+  }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (disabled) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (value.trim()) {
-        onSubmit(value.trim())
-        setValue('')
-      }
+      submitValue()
     }
   }
 
@@ -38,7 +58,14 @@ export function NovelCopilotComposer({
       textareaRef.current.style.height = 'auto'
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
     }
-  }, [value])
+  }, [resolvedValue])
+
+  useEffect(() => {
+    if (focusSignal == null || !textareaRef.current) return
+    textareaRef.current.focus()
+    const nextPos = textareaRef.current.value.length
+    textareaRef.current.setSelectionRange(nextPos, nextPos)
+  }, [focusSignal])
 
   return (
     <div className="relative group">
@@ -55,8 +82,8 @@ export function NovelCopilotComposer({
         <div className="flex items-end gap-2">
           <textarea
             ref={textareaRef}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
+            value={resolvedValue}
+            onChange={(e) => updateValue(e.target.value)}
             onKeyDown={handleKeyDown}
             disabled={disabled}
             placeholder={resolvedPlaceholder}
@@ -65,14 +92,8 @@ export function NovelCopilotComposer({
           />
           <button
             type="button"
-            onClick={() => {
-              if (disabled) return
-              if (value.trim()) {
-                onSubmit(value.trim())
-                setValue('')
-              }
-            }}
-            disabled={disabled || !value.trim()}
+            onClick={submitValue}
+            disabled={disabled || !resolvedValue.trim()}
             className={cn(
               'mb-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[hsl(var(--foreground)/0.12)] bg-foreground text-background shadow-[0_4px_12px_rgba(0,0,0,0.08)] transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-foreground/90 hover:shadow-[0_8px_24px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.04)] hover:-translate-y-[1px] active:scale-[0.97] active:duration-150 disabled:opacity-50 disabled:grayscale disabled:hover:-translate-y-0 disabled:hover:shadow-none',
             )}

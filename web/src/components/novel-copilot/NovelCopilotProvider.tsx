@@ -26,6 +26,7 @@ export function NovelCopilotProvider({
   const sessionsState = useNovelCopilotSessionsState({
     novelId,
     interactionLocale: effectiveInteractionLocale,
+    entrypoint: 'copilot_drawer',
   })
   const runsState = useNovelCopilotRunsState(sessionsState.sessions)
   const controllerState = useNovelCopilotRuns({
