@@ -8,7 +8,7 @@ import {
   type NovelCopilotSession,
 } from '@/types/copilot'
 import { getDefaultCopilotSessionTitle } from '@/components/novel-copilot/novelCopilotHelpers'
-import { copilotApi } from '@/services/api'
+import { assistantChatApi, copilotApi } from '@/services/api'
 
 export interface NovelCopilotSessionsOnlyState {
   isOpen: boolean
@@ -111,7 +111,8 @@ export function useNovelCopilotSessionsState({
       return inflightRequest.promise
     }
 
-    const promise = copilotApi.openSession(session.novelId, buildOpenSessionRequest(session))
+    const sessionApi = session.entrypoint === 'assistant_chat' ? assistantChatApi : copilotApi
+    const promise = sessionApi.openSession(session.novelId, buildOpenSessionRequest(session))
       .then((resp) => {
         const currentSession = sessionsRef.current.find((candidate) => candidate.sessionId === sessionId)
         if (!currentSession) return resp.session_id

@@ -4,7 +4,9 @@ import { Bot, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { useNovelAssistantChat } from './NovelAssistantChatContext'
+import { buildAssistantChatSessionKey } from './assistantChatSessionKey'
 import { getCopilotWorkbenchMeta } from '@/components/novel-copilot/novelCopilotWorkbench'
+import { buildAssistantChatLaunchArgs } from '@/components/novel-copilot/novelCopilotLauncher'
 import { NovelCopilotComposer } from '@/components/novel-copilot/NovelCopilotComposer'
 import { NovelCopilotModelPicker } from '@/components/novel-copilot/NovelCopilotModelPicker'
 import { NovelCopilotSuggestionCard } from '@/components/novel-copilot/NovelCopilotSuggestionCard'
@@ -25,10 +27,6 @@ const sectionPanelClassName = `${copilotPanelClassName} rounded-[24px] p-4`
 const dashedPanelClassName =
   `${copilotPanelMutedClassName} rounded-[22px] border-dashed px-4 py-4 text-center text-sm text-muted-foreground`
 const assistantChatPanelHeightClassName = 'h-full max-h-[min(68vh,720px)]'
-
-function buildAssistantChatSessionKey() {
-  return `nac_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-}
 
 export function NovelAssistantChatPanel({
   className,
@@ -127,8 +125,9 @@ export function NovelAssistantChatPanel({
   }, [persistSelectedModel, selectedModel, session, submitPrompt])
 
   const handleCreateSession = useCallback(() => {
+    const [prefill] = buildAssistantChatLaunchArgs()
     openDrawer(
-      { mode: 'research', scope: 'whole_book' },
+      prefill,
       {
         displayTitle: t('copilot.chat.sessionTitle'),
         sessionKey: buildAssistantChatSessionKey(),

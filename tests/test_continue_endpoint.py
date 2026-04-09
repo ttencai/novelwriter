@@ -350,6 +350,26 @@ class TestContinueEndpoint:
         assert prompts[0].rstrip().endswith("请续写第3章：")
 
 
+    @pytest.mark.parametrize("target_chars", [6000, 8000])
+    def test_target_chars_accepts_6000_and_custom_values(self, client, novel, monkeypatch, target_chars):
+        c, _ = client
+
+        import app.core.generator as generator_mod
+
+        async def fake_generate(prompt: str, system_prompt: str = "", max_tokens: int = 0, **kwargs) -> str:
+            del prompt, system_prompt, max_tokens, kwargs
+            return "sample" * 1200
+
+        monkeypatch.setattr(generator_mod.ai_client, "generate", fake_generate)
+
+        resp = c.post(
+            f"/api/novels/{novel.id}/continue",
+            json={"num_versions": 1, "context_chapters": 2, "target_chars": target_chars},
+        )
+        assert resp.status_code == 200
+        assert len(resp.json()["continuations"]) == 1
+
+
     def test_user_prompt_is_part_of_relevance_signal(self, client, novel, world):
         c, captured = client
 

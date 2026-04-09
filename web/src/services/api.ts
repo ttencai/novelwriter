@@ -43,7 +43,7 @@ import {
   request,
   throwApiError,
 } from './apiClient'
-import { copilotApi } from './copilotApi'
+import { assistantChatApi, copilotApi } from './copilotApi'
 
 const listNovels = () => request<Novel[]>('/api/novels')
 const listChapters = (novelId: number) => request<Chapter[]>(`/api/novels/${novelId}/chapters`)
@@ -229,7 +229,7 @@ export async function* streamContinuation(
   if (tail) yield parseLine(tail)
 }
 
-export { ApiError, copilotApi, llmHeaders }
+export { ApiError, assistantChatApi, copilotApi, llmHeaders }
 
 export const worldApi = {
   // World generation

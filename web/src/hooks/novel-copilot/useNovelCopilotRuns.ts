@@ -6,7 +6,7 @@ import {
   type CopilotScope,
   type NovelCopilotSession,
 } from '@/types/copilot'
-import { ApiError, copilotApi } from '@/services/api'
+import { ApiError, assistantChatApi, copilotApi } from '@/services/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { useToast } from '@/components/world-model/shared/useToast'
@@ -168,6 +168,10 @@ function replaceSessionRun(
   return { ...prev, [sessionId]: nextRuns }
 }
 
+function getRunApi(session: NovelCopilotSession) {
+  return session.entrypoint === 'assistant_chat' ? assistantChatApi : copilotApi
+}
+
 export function useNovelCopilotRuns({
   sessions,
   focusedSessionId,
@@ -292,7 +296,7 @@ export function useNovelCopilotRuns({
             return
           }
 
-          const resp = await copilotApi.pollRun(sessionNovelId, backendSessionId, runId)
+          const resp = await getRunApi(session).pollRun(sessionNovelId, backendSessionId, runId)
           pollFailureCountsRef.current[localSessionId] = 0
 
           setRunsBySessionId((prev) => {
@@ -354,7 +358,7 @@ export function useNovelCopilotRuns({
     let cancelled = false
     hydratingSessionIdsRef.current.add(session.sessionId)
 
-    void copilotApi.listRuns(session.novelId, hydratedBackendSessionId)
+    void getRunApi(session).listRuns(session.novelId, hydratedBackendSessionId)
       .then((resp) => {
         if (cancelled) return
 
@@ -423,7 +427,7 @@ export function useNovelCopilotRuns({
         const backendSessionId = await resolveBackendSessionId(sessionId)
         if (!sessionsByIdRef.current.has(sessionId)) return false
 
-        const resp = await copilotApi.createRun(session.novelId, backendSessionId, {
+        const resp = await getRunApi(session).createRun(session.novelId, backendSessionId, {
           prompt,
           quick_action_id: quickAction ?? undefined,
         })
@@ -470,7 +474,7 @@ export function useNovelCopilotRuns({
       const backendSessionId = await resolveBackendSessionId(sessionId)
       if (!sessionsByIdRef.current.has(sessionId)) return false
 
-      const resp = await copilotApi.createRun(session.novelId, backendSessionId, {
+      const resp = await getRunApi(session).createRun(session.novelId, backendSessionId, {
         prompt: run.prompt,
         resume_run_id: run.run_id,
       })
@@ -497,6 +501,7 @@ export function useNovelCopilotRuns({
     const session = sessionsByIdRef.current.get(sessionId)
     const run = (runsBySessionId[sessionId] ?? []).find((candidate) => candidate.run_id === runId) ?? null
     if (!session || !run) return false
+    if (session.entrypoint === 'assistant_chat') return false
 
     try {
       const backendSessionId = await resolveBackendSessionId(sessionId)
@@ -539,6 +544,7 @@ export function useNovelCopilotRuns({
     const session = sessionsByIdRef.current.get(sessionId)
     const run = (runsBySessionId[sessionId] ?? []).find((candidate) => candidate.run_id === runId) ?? null
     if (!session || !run) return
+    if (session.entrypoint === 'assistant_chat') return
 
     setRunsBySessionId((prev) => {
       const sessionRuns = prev[sessionId] ?? []

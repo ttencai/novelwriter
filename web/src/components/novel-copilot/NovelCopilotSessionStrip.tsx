@@ -31,6 +31,12 @@ export function NovelCopilotSessionStrip({
   const { locale, t } = useUiLocale()
   if (sessions.length === 0) return null
 
+  const getSessionLabel = (session: NovelCopilotSession) => (
+    session.entrypoint === 'assistant_chat'
+      ? t('copilot.drawer.modeChat')
+      : getCopilotScopeLabel(session.prefill, locale)
+  )
+
   return (
     <div
       className="shrink-0 border-b border-[var(--nw-copilot-border)] bg-[linear-gradient(180deg,hsl(var(--background)/0.16),transparent)] px-4 py-3"
@@ -81,7 +87,7 @@ export function NovelCopilotSessionStrip({
                   <div className="mb-2 flex items-center gap-1.5">
                     <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', statusMeta.dotClassName)} />
                     <span className="truncate text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/72">
-                      {getCopilotScopeLabel(session.prefill, locale)}
+                      {getSessionLabel(session)}
                     </span>
                   </div>
                   <div className="truncate text-sm font-semibold text-foreground">

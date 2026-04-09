@@ -83,8 +83,10 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
       }
       if (p.target_chars != null) {
         const tc = Number(p.target_chars)
-        const match = LENGTH_OPTIONS.find(o => Number(o.value) === tc)
-        if (match) setSelectedLength(match.value)
+        if (Number.isFinite(tc) && tc > 0) {
+          const match = LENGTH_OPTIONS.find(o => Number(o.value) === tc)
+          setSelectedLength(match ? match.value : String(Math.trunc(tc)))
+        }
       }
       setPrefsLoaded(true)
     })

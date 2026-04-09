@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator, TypeAdapter
 from pydantic_core import PydanticCustomError
-from typing import ClassVar, Optional, List, Literal, Any
+from typing import Optional, List, Literal, Any
 from datetime import datetime
 from enum import Enum
 
@@ -128,12 +128,10 @@ class ContinuationResponse(BaseModel):
 
 
 class ContinueRequest(BaseModel):
-    ALLOWED_TARGET_CHARS: ClassVar[set[int]] = {2000, 3000, 4000}
-
     num_versions: int = Field(default=1, ge=1, le=2)
     prompt: str | None = Field(default=None, max_length=2000, description="用户续写指令")
     max_tokens: int | None = Field(default=None, ge=100, le=16000, description="生成的最大 token 数")
-    target_chars: int | None = Field(default=None, description="目标续写字数（2000/3000/4000）")
+    target_chars: int | None = Field(default=None, ge=1, description="Target continuation length in characters")
     context_chapters: int | None = Field(
         default=None,
         ge=1,
@@ -148,8 +146,6 @@ class ContinueRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_target_chars(self):
-        if self.target_chars is not None and self.target_chars not in self.ALLOWED_TARGET_CHARS:
-            raise ValueError(f"target_chars must be one of {sorted(self.ALLOWED_TARGET_CHARS)}")
         if self.context_chapters is not None and self.context_chapters < 1:
             self.context_chapters = 1
         return self

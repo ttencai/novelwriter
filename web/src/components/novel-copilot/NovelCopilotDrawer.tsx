@@ -6,6 +6,7 @@ import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { getCopilotScopeLabel } from './novelCopilotHelpers'
 import { useNovelCopilot } from './NovelCopilotContext'
 import { useNovelAssistantChat } from '@/components/novel-chat/NovelAssistantChatContext'
+import { buildAssistantChatSessionKey } from '@/components/novel-chat/assistantChatSessionKey'
 import type { CopilotEvidence, CopilotSuggestionTarget } from '@/types/copilot'
 import {
   useOptionalNovelShell,
@@ -21,7 +22,7 @@ import { NovelCopilotSuggestionCard } from './NovelCopilotSuggestionCard'
 import { AiStatusPill } from './AiStatusPill'
 import { NovelCopilotSessionStrip } from './NovelCopilotSessionStrip'
 import { NovelCopilotModelPicker } from './NovelCopilotModelPicker'
-import { buildWholeBookCopilotLaunchArgs } from './novelCopilotLauncher'
+import { buildAssistantChatLaunchArgs, buildWholeBookCopilotLaunchArgs } from './novelCopilotLauncher'
 import { getCopilotWorkbenchMeta } from './novelCopilotWorkbench'
 import {
   copilotDrawerShellClassName,
@@ -268,11 +269,12 @@ function ActiveNovelCopilotDrawer({
 
   const ensureAssistantSession = useCallback(() => {
     if (assistantChat.focusedSessionId) return
-    const [prefill] = buildWholeBookCopilotLaunchArgs(shell?.routeState)
+    const [prefill] = buildAssistantChatLaunchArgs()
     assistantChat.openDrawer(prefill, {
       displayTitle: t('copilot.chat.sessionTitle'),
+      sessionKey: buildAssistantChatSessionKey(),
     })
-  }, [assistantChat, shell, t])
+  }, [assistantChat, t])
 
   const handleConversationModeChange = useCallback((nextUseResearchSession: boolean) => {
     setUseResearchSession(nextUseResearchSession)
@@ -323,7 +325,7 @@ function ActiveNovelCopilotDrawer({
 
   const handleCreateSession = useCallback(() => {
     if (!useResearchSession) {
-      const [prefill] = buildWholeBookCopilotLaunchArgs(shell?.routeState)
+      const [prefill] = buildAssistantChatLaunchArgs()
       assistantChat.openDrawer(prefill, {
         displayTitle: t('copilot.chat.sessionTitle'),
         sessionKey: buildCopilotSessionKey(),
@@ -428,6 +430,7 @@ function ActiveNovelCopilotDrawer({
                         <button
                           type="button"
                           onClick={() => handleConversationModeChange(false)}
+                          data-testid="copilot-mode-chat"
                           className={cn(
                             'rounded-[12px] px-3 py-1.5 text-[11px] font-semibold tracking-[0.01em] transition-all duration-200',
                             !useResearchSession
@@ -440,6 +443,7 @@ function ActiveNovelCopilotDrawer({
                         <button
                           type="button"
                           onClick={() => handleConversationModeChange(true)}
+                          data-testid="copilot-mode-research"
                           className={cn(
                             'rounded-[12px] px-3 py-1.5 text-[11px] font-semibold tracking-[0.01em] transition-all duration-200',
                             useResearchSession

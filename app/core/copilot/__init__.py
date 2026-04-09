@@ -136,6 +136,26 @@ def _assistant_chat_evidence_from_workspace(
 ) -> list[EvidenceItem]:
     return list(base_evidence)
 
+
+def _build_plain_assistant_chat_system_prompt(interaction_locale: str = "zh") -> str:
+    if interaction_locale == "en":
+        return (
+            "You are a normal multi-turn AI chat assistant.\n"
+            "Answer the user directly.\n"
+            "Do not assume the current novel, world model, or research workspace is the topic unless the user explicitly asks about it.\n"
+            "Do not frame your answer as whole-book exploration, world research, or workspace analysis.\n"
+            "Use earlier chat turns when they matter.\n"
+            "For everyday questions, real-world knowledge, writing, translation, and coding requests, respond like a standard chat assistant."
+        )
+    return (
+        "你是一个普通的多轮 AI 聊天助手。\n"
+        "直接回答用户问题。\n"
+        "除非用户明确要求讨论当前小说、世界模型或工作台，否则不要默认把它们当作回答前提。\n"
+        "不要把回答表述成“全书探索”“全书研究”“工作台分析”之类的口吻。\n"
+        "需要时结合本会话前文继续回答。\n"
+        "对于日常聊天、现实问题、写作、翻译、代码等请求，都按普通聊天助手方式直接作答。"
+    )
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -534,6 +554,9 @@ def build_session_signature(
 def _is_assistant_chat_session(session: CopilotSession | None) -> bool:
     if session is None:
         return False
+    display_title = str(getattr(session, "display_title", "") or "").strip().lower()
+    if display_title in {"ai chat", "ai 对话"}:
+        return True
     return session.signature == build_session_signature(
         session.mode,
         session.scope,
@@ -1085,6 +1108,109 @@ async def execute_copilot_run(
                 err_db.close()
         except Exception:
             logger.exception("Failed to mark run %s as errored", run_id)
+    finally:
+        db.close()
+
+
+async def execute_assistant_chat_run(
+    run_id: str,
+    novel_id: int,
+    user_id: int,
+    llm_config: dict[str, Any] | None,
+) -> None:
+    """Execute a plain multi-turn assistant chat run without research scope loading."""
+    from app.database import SessionLocal
+
+    worker_id = uuid.uuid4().hex
+    db = SessionLocal()
+    try:
+        run = _claim_run_for_execution(db, run_id=run_id, worker_id=worker_id)
+        if not run:
+            logger.info("Assistant chat run %s was not claimable for execution", run_id)
+            return
+
+        session = run.session
+        if not session:
+            _fail_run(db, run, "session_not_found", "Session not found", worker_id=worker_id)
+            return
+        if not _is_assistant_chat_session(session):
+            _fail_run(
+                db,
+                run,
+                "assistant_chat_session_required",
+                "Assistant chat session not found",
+                worker_id=worker_id,
+            )
+            return
+
+        novel = db.get(Novel, novel_id)
+        if not novel:
+            _fail_run(db, run, "novel_not_found", "Novel not found", worker_id=worker_id)
+            return
+
+        prior_completed_runs = (
+            db.query(CopilotRun)
+            .filter(
+                CopilotRun.copilot_session_id == session.id,
+                CopilotRun.id != run.id,
+                CopilotRun.status == "completed",
+            )
+            .order_by(CopilotRun.created_at.asc(), CopilotRun.id.asc())
+            .all()
+        )
+        follow_up_messages = _build_follow_up_conversation_messages(prior_completed_runs)
+        system_prompt = _build_plain_assistant_chat_system_prompt(session.interaction_locale)
+        messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        if follow_up_messages:
+            messages.extend(follow_up_messages)
+        messages.append({"role": "user", "content": run.prompt})
+
+        def db_factory() -> Session:
+            return SessionLocal()
+
+        if not _renew_run_lease(db_factory, run_id=run_id, worker_id=worker_id):
+            raise RunLeaseLostError(run_id)
+        await acquire_llm_slot()
+        try:
+            answer = await _call_chat_completions_llm(messages, llm_config, user_id)
+        finally:
+            release_llm_slot()
+        if not _renew_run_lease(db_factory, run_id=run_id, worker_id=worker_id):
+            raise RunLeaseLostError(run_id)
+
+        if not _persist_completed_run(
+            db_factory,
+            run_id=run_id,
+            worker_id=worker_id,
+            answer=answer,
+            evidence=[],
+            compiled_suggestions=[],
+            workspace=None,
+            execution_mode="assistant_chat",
+            degraded_reason=None,
+        ):
+            logger.warning("Skipping assistant-chat result persistence for run %s after lease loss", run_id)
+    except RunLeaseLostError:
+        logger.info("Assistant chat run %s lost lease during execution", run_id)
+        return
+    except Exception:
+        logger.exception("Assistant chat run %s failed", run_id)
+        try:
+            err_db = SessionLocal()
+            try:
+                err_run = err_db.query(CopilotRun).filter(CopilotRun.run_id == run_id).first()
+                if err_run:
+                    _fail_run(
+                        err_db,
+                        err_run,
+                        "run_execution_error",
+                        _copilot_run_failed_message(_resolve_run_interaction_locale(err_run)),
+                        worker_id=worker_id,
+                    )
+            finally:
+                err_db.close()
+        except Exception:
+            logger.exception("Failed to mark assistant chat run %s as errored", run_id)
     finally:
         db.close()
 

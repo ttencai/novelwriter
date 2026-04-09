@@ -413,6 +413,17 @@ class TestSessionOpenReuse:
         assert created is False
         assert reused.session_id == first.session_id
 
+    def test_assistant_chat_session_key_is_still_recognized_as_chat(self, db, novel):
+        import app.core.copilot as copilot_mod
+        from app.core.copilot import open_or_reuse_session
+
+        chat, created = open_or_reuse_session(
+            db, novel.id, 1, "research", "whole_book", None, "zh", "assistant_chat", "AI Chat", "chat-a"
+        )
+        assert created is True
+        assert copilot_mod._is_assistant_chat_session(chat) is True
+
+
     def test_current_entity_scope_requires_entity_id(self, client, novel):
         resp = client.post(
             f"/api/novels/{novel.id}/world/copilot/sessions",
@@ -2237,6 +2248,27 @@ class TestScopeAndPrompt:
         assert "只能处理小说工作台" in prompt
         assert "## 世界模型" not in prompt
 
+
+    def test_assistant_chat_prompt_uses_minimal_optional_workspace_context(self, db, novel):
+        from app.core.copilot import build_copilot_system_prompt, load_scope_snapshot
+
+        snapshot = load_scope_snapshot(db, novel, "research", "whole_book", None)
+        prompt = build_copilot_system_prompt(
+            snapshot,
+            [],
+            "whole_book",
+            "en",
+            {"context_json": {"surface": "studio", "stage": "write"}, "display_title": "AI Chat"},
+            "task_query",
+            assistant_chat=True,
+        )
+
+        assert "A novel workspace is currently open in the app." in prompt
+        assert "Do not use it unless the user explicitly asks about the current novel" in prompt
+        assert "Capabilities in this scope" not in prompt
+        assert "Current surface:" not in prompt
+        assert "## World model" not in prompt
+
     @pytest.mark.asyncio
     async def test_assistant_chat_executes_plain_chat_completion_and_reuses_history(self, db, novel, monkeypatch):
         import app.database as db_mod
@@ -2318,6 +2350,59 @@ class TestScopeAndPrompt:
         assert run.answer == "plain reply"
         assert run.evidence_json == []
         assert run.suggestions_json == []
+
+    @pytest.mark.asyncio
+    async def test_dedicated_assistant_chat_runtime_bypasses_research_scope_loading(self, db, novel, monkeypatch):
+        import app.database as db_mod
+        import app.core.copilot as copilot_mod
+
+        from app.core.copilot import create_run, execute_assistant_chat_run, open_or_reuse_session
+
+        session, _ = open_or_reuse_session(
+            db, novel.id, 1, "research", "whole_book", None, "zh", "assistant_chat", "AI Chat"
+        )
+        prior_run = create_run(db, session, 1, "你好")
+        prior_run.status = "completed"
+        prior_run.answer = "你好，有什么想聊的？"
+        db.commit()
+
+        run = create_run(db, session, 1, "请写一段肉番本子对白")
+        captured: dict[str, object] = {}
+
+        def broken_load_scope_snapshot(*_args, **_kwargs):
+            raise AssertionError("dedicated assistant chat should not load research scope snapshots")
+
+        def broken_gather_evidence(*_args, **_kwargs):
+            raise AssertionError("dedicated assistant chat should not gather story evidence")
+
+        async def fake_chat_completion(messages, _llm_config, _user_id):
+            captured["messages"] = messages
+            return "直接聊天回复"
+
+        monkeypatch.setattr(db_mod, "SessionLocal", TestingSessionLocal)
+        monkeypatch.setattr(copilot_mod, "load_scope_snapshot", broken_load_scope_snapshot)
+        monkeypatch.setattr(copilot_mod, "gather_evidence", broken_gather_evidence)
+        monkeypatch.setattr(copilot_mod, "_call_chat_completions_llm", fake_chat_completion)
+
+        await execute_assistant_chat_run(run.run_id, novel.id, 1, llm_config={"billing_source_hint": "selfhost"})
+
+        db.expire_all()
+        run = db.query(CopilotRun).filter(CopilotRun.run_id == run.run_id).one()
+        assert run.status == "completed"
+        assert run.answer == "直接聊天回复"
+        assert run.evidence_json == []
+        assert run.suggestions_json == []
+
+        messages = captured["messages"]
+        assert isinstance(messages, list)
+        assert messages[0]["role"] == "system"
+        assert messages[0]["content"].find("普通") >= 0
+        assert messages[0]["content"].find("不要默认把它们当作回答前提") >= 0
+        assert messages[1:] == [
+            {"role": "user", "content": "你好"},
+            {"role": "assistant", "content": "你好，有什么想聊的？"},
+            {"role": "user", "content": "请写一段肉番本子对白"},
+        ]
 
     @pytest.mark.asyncio
     async def test_run_one_shot_uses_prior_messages(self, db, novel, monkeypatch):

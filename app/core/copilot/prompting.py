@@ -931,6 +931,31 @@ def _build_workbench_context_text(
     return "\n".join(lines)
 
 
+def _build_assistant_chat_context_text(
+    session_data: dict[str, Any],
+    interaction_locale: str = "zh",
+) -> str:
+    context = session_data.get("context_json") or {}
+    has_workspace_context = any(
+        context.get(key)
+        for key in ("surface", "stage", "tab", "entity_id")
+    )
+
+    if interaction_locale == "en":
+        if has_workspace_context:
+            return (
+                "A novel workspace is currently open in the app. Treat it as optional background only. "
+                "Do not use it unless the user explicitly asks about the current novel, chapter, or world model."
+            )
+        return (
+            "No specific novel workspace context is required for this turn. Answer as a normal general-purpose chat."
+        )
+
+    if has_workspace_context:
+        return "当前应用里打开着一个小说工作区，但它只是在用户明确提到当前小说、章节或世界设定时才可作为参考；否则不要主动带入。"
+    return "这一轮不需要绑定任何小说工作区上下文，按普通通用聊天直接回答即可。"
+
+
 def _build_intent_behavior_text(turn_intent: str, interaction_locale: str = "zh") -> str:
     if turn_intent == "smalltalk":
         return _prompt_text(interaction_locale, "intent_smalltalk")
@@ -1246,7 +1271,11 @@ def build_copilot_system_prompt(
 ) -> str:
     novel_lang = snapshot.novel_language
     runtime_instr = _build_runtime_instruction_text(snapshot, scenario, interaction_locale)
-    workbench_context = _build_workbench_context_text(snapshot, scenario, session_data, interaction_locale)
+    workbench_context = (
+        _build_assistant_chat_context_text(session_data, interaction_locale)
+        if assistant_chat
+        else _build_workbench_context_text(snapshot, scenario, session_data, interaction_locale)
+    )
     intent_behavior = (
         _build_assistant_chat_intent_behavior_text(turn_intent, interaction_locale)
         if assistant_chat

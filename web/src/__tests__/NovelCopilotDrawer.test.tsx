@@ -54,6 +54,12 @@ vi.mock('@/services/api', async (importOriginal) => {
       applySuggestions: (...args: unknown[]) => mockApplySuggestions(...args),
       dismissSuggestions: (...args: unknown[]) => mockDismissSuggestions(...args),
     },
+    assistantChatApi: {
+      openSession: (...args: unknown[]) => mockOpenSession(...args),
+      listRuns: (...args: unknown[]) => mockListRuns(...args),
+      createRun: (...args: unknown[]) => mockCreateRun(...args),
+      pollRun: (...args: unknown[]) => mockPollRun(...args),
+    },
   }
 })
 
@@ -149,7 +155,7 @@ beforeEach(() => {
   mockDismissSuggestions.mockReset().mockResolvedValue({ ok: true })
 })
 
-function DrawerHarness() {
+function DrawerHarness({ assistantAutoInitialize = false }: { assistantAutoInitialize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
   return createElement(
@@ -169,7 +175,7 @@ function DrawerHarness() {
             { novelId: 1, interactionLocale: 'zh' },
             createElement(
               NovelAssistantChatProvider,
-              { novelId: 1, interactionLocale: 'zh', autoInitialize: false },
+              { novelId: 1, interactionLocale: 'zh', autoInitialize: assistantAutoInitialize },
               createElement(SearchEcho),
               createElement(SessionCountProbe),
               createElement(DrawerTriggers),
@@ -526,7 +532,7 @@ describe('NovelCopilotDrawer', () => {
     await user.click(screen.getByRole('button', { name: 'open-whole-book' }))
     await screen.findByTestId('novel-copilot-drawer')
 
-    await user.click(screen.getByRole('button', { name: '普通对话' }))
+    await user.click(screen.getByTestId('copilot-mode-chat'))
 
     await waitFor(() => {
       expect(mockOpenSession).toHaveBeenLastCalledWith(
@@ -534,6 +540,7 @@ describe('NovelCopilotDrawer', () => {
         expect.objectContaining({
           entrypoint: 'assistant_chat',
           display_title: 'AI 对话',
+          session_key: expect.any(String),
         }),
       )
     })
@@ -561,6 +568,58 @@ describe('NovelCopilotDrawer', () => {
         session_key: expect.any(String),
       }),
     )
+  })
+
+  it('creates normal chat sessions from the plus button without showing them as whole-book research', async () => {
+    const user = userEvent.setup()
+    render(createElement(DrawerHarness))
+
+    await user.click(screen.getByRole('button', { name: 'open-whole-book' }))
+    await screen.findByTestId('novel-copilot-drawer')
+
+    await user.click(screen.getByTestId('copilot-mode-chat'))
+    await waitFor(() => {
+      expect(mockOpenSession).toHaveBeenLastCalledWith(
+        1,
+        expect.objectContaining({
+          entrypoint: 'assistant_chat',
+          session_key: expect.any(String),
+        }),
+      )
+    })
+
+    await user.click(screen.getByTestId('novel-copilot-create-session'))
+
+    await waitFor(() => {
+      expect(mockOpenSession).toHaveBeenLastCalledWith(
+        1,
+        expect.objectContaining({
+          entrypoint: 'assistant_chat',
+          session_key: expect.any(String),
+        }),
+      )
+    })
+
+    const sessionStrip = screen.getByTestId('novel-copilot-session-strip')
+    expect(within(sessionStrip).getAllByText('\u666e\u901a\u5bf9\u8bdd').length).toBeGreaterThan(0)
+    expect(within(sessionStrip).queryByText('\u5168\u4e66\u7814\u7a76')).toBeNull()
+  })
+
+  it('can remove the last normal-chat session without it being auto recreated', async () => {
+    const user = userEvent.setup()
+    render(createElement(DrawerHarness, { assistantAutoInitialize: true }))
+
+    await user.click(screen.getByRole('button', { name: 'open-whole-book' }))
+    await screen.findByTestId('novel-copilot-drawer')
+    await user.click(screen.getByTestId('copilot-mode-chat'))
+
+    const chatSession = await screen.findByTestId(/novel-copilot-session-ncs_/)
+    await user.click(within(chatSession).getByRole('button', { name: '关闭会话' }))
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('novel-copilot-session-strip')).toBeNull()
+    })
+    expect(screen.getByTestId('novel-copilot-empty-state')).toBeTruthy()
   })
 
   it('can quote chapter evidence back into the composer for a follow-up question', async () => {

@@ -367,3 +367,24 @@ export const copilotApi = {
       body: JSON.stringify({ suggestion_ids: suggestionIds }),
     }),
 }
+
+export const assistantChatApi = {
+  openSession: (novelId: number, data: CopilotSessionOpenRequest) =>
+    requestParsed(`/api/novels/${novelId}/assistant-chat/sessions`, parseCopilotSessionResponse, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  createRun: (novelId: number, sessionId: string, data: CopilotRunCreateRequest) =>
+    requestParsed(`/api/novels/${novelId}/assistant-chat/sessions/${sessionId}/runs`, parseCopilotRunResponse, {
+      method: 'POST',
+      headers: llmHeaders(),
+      body: JSON.stringify(data),
+    }),
+
+  pollRun: (novelId: number, sessionId: string, runId: string) =>
+    requestParsed(`/api/novels/${novelId}/assistant-chat/sessions/${sessionId}/runs/${runId}`, parseCopilotRunResponse, {}),
+
+  listRuns: (novelId: number, sessionId: string) =>
+    requestParsed(`/api/novels/${novelId}/assistant-chat/sessions/${sessionId}/runs`, parseCopilotRunListResponse, {}),
+}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import {
   getDefaultCopilotInteractionLocale,
   normalizeCopilotInteractionLocale,
@@ -6,9 +6,10 @@ import {
 import { useNovelCopilotRuns, useNovelCopilotRunsState } from '@/hooks/novel-copilot/useNovelCopilotRuns'
 import { useNovelCopilotSessionsState } from '@/hooks/novel-copilot/useNovelCopilotSessions'
 import type { NovelShellRouteState } from '@/components/novel-shell/NovelShellRouteState'
-import { buildWholeBookCopilotLaunchArgs } from '@/components/novel-copilot/novelCopilotLauncher'
+import { buildAssistantChatLaunchArgs } from '@/components/novel-copilot/novelCopilotLauncher'
 import { translateUiMessage } from '@/lib/uiMessages'
 import { NovelAssistantChatContext } from './NovelAssistantChatContext'
+import { buildAssistantChatSessionKey } from './assistantChatSessionKey'
 
 export function NovelAssistantChatProvider({
   children,
@@ -26,6 +27,7 @@ export function NovelAssistantChatProvider({
   const effectiveInteractionLocale = normalizeCopilotInteractionLocale(
     interactionLocale ?? getDefaultCopilotInteractionLocale(),
   )
+  const hasAutoInitializedRef = useRef(false)
   const sessionsState = useNovelCopilotSessionsState({
     novelId,
     interactionLocale: effectiveInteractionLocale,
@@ -42,10 +44,12 @@ export function NovelAssistantChatProvider({
   })
 
   useEffect(() => {
-    if (!autoInitialize || novelId == null || sessionsState.focusedSessionId) return
-    const [prefill] = buildWholeBookCopilotLaunchArgs(routeState)
+    if (!autoInitialize || novelId == null || sessionsState.focusedSessionId || hasAutoInitializedRef.current) return
+    hasAutoInitializedRef.current = true
+    const [prefill] = buildAssistantChatLaunchArgs()
     sessionsState.openDrawer(prefill, {
       displayTitle: translateUiMessage(effectiveInteractionLocale, 'copilot.chat.sessionTitle'),
+      sessionKey: buildAssistantChatSessionKey(),
     })
   }, [autoInitialize, effectiveInteractionLocale, novelId, routeState, sessionsState])
 

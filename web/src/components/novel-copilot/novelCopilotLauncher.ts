@@ -46,6 +46,17 @@ export function buildWholeBookCopilotLaunchArgs(
   ]
 }
 
+export function buildAssistantChatLaunchArgs(): NovelCopilotLaunchArgs {
+  const locale = resolveCurrentUiLocale()
+  return [
+    {
+      mode: 'research',
+      scope: 'whole_book',
+    },
+    { displayTitle: translateUiMessage(locale, 'copilot.chat.sessionTitle') },
+  ]
+}
+
 export function buildCurrentEntityCopilotLaunchArgs({
   entityId,
   entityName,
