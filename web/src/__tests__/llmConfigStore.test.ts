@@ -7,7 +7,7 @@ describe('llmConfigStore', () => {
     localStorage.clear()
   })
 
-  it('stores config in memory only', () => {
+  it('stores config in local storage so refreshes can restore it', () => {
     setLlmConfig({ baseUrl: ' http://example.com/v1 ', apiKey: ' sk-test ', model: ' m ' })
 
     expect(getLlmConfig()).toEqual({
@@ -15,7 +15,7 @@ describe('llmConfigStore', () => {
       apiKey: 'sk-test',
       model: 'm',
     })
-    expect(localStorage.length).toBe(0)
+    expect(localStorage.getItem('novwr_llm_config_v1')).toContain('http://example.com/v1')
   })
 
   it('clears config completely', () => {
@@ -23,6 +23,7 @@ describe('llmConfigStore', () => {
     clearLlmConfig()
 
     expect(getLlmConfig()).toEqual({ baseUrl: '', apiKey: '', model: '' })
+    expect(localStorage.getItem('novwr_llm_config_v1')).toBeNull()
   })
 
   it('hydrates empty config fields from defaults', () => {
@@ -52,6 +53,26 @@ describe('llmConfigStore', () => {
       baseUrl: 'https://api.openai.com/v1',
       apiKey: 'sk-env',
       model: 'gpt-5.4',
+    })
+  })
+
+  it('prefers saved config over defaults after refresh-like reinitialization', () => {
+    setLlmConfig({
+      baseUrl: 'https://saved.example/v1',
+      apiKey: 'sk-saved',
+      model: 'gpt-saved',
+    })
+
+    expect(
+      initializeLlmConfig({
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-env',
+        model: 'gpt-5.4',
+      }),
+    ).toEqual({
+      baseUrl: 'https://saved.example/v1',
+      apiKey: 'sk-saved',
+      model: 'gpt-saved',
     })
   })
 })

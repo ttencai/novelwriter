@@ -52,11 +52,11 @@ export function LlmConfigCard() {
             apiKey: apiKey.trim(),
             model: model.trim(),
         })
+        setResult({ ok: true, message: t('llm.result.saved') })
     }
 
     const selectModel = (value: string) => {
         setModel(value)
-        setLlmConfig({ model: value })
         setShowModelList(false)
         setResult({ ok: true, message: translateUiMessage(locale, 'llm.result.modelSelected', { model: value }) })
     }
@@ -100,7 +100,6 @@ export function LlmConfigCard() {
             setShowModelList(ids.length > 0)
             if (!model.trim() && ids.length > 0) {
                 setModel(ids[0])
-                setLlmConfig({ model: ids[0] })
             }
             setResult({ ok: true, message: translateUiMessage(locale, 'llm.result.modelsLoaded', { count: ids.length }) })
         } catch (e) {
@@ -142,7 +141,6 @@ export function LlmConfigCard() {
                     type="text"
                     value={baseUrl}
                     onChange={(e) => setBaseUrl(e.target.value)}
-                    onBlur={save}
                     placeholder="https://api.openai.com/v1"
                     className="h-10 rounded-lg border border-[var(--nw-glass-border)] bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 />
@@ -157,7 +155,6 @@ export function LlmConfigCard() {
                     type="password"
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
-                    onBlur={save}
                     placeholder="sk-..."
                     className="h-10 rounded-lg border border-[var(--nw-glass-border)] bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 />
@@ -174,7 +171,6 @@ export function LlmConfigCard() {
                         value={model}
                         onChange={(e) => setModel(e.target.value)}
                         onFocus={() => setShowModelList(models.length > 0)}
-                        onBlur={save}
                         placeholder="gpt-4o-mini"
                         className="h-10 flex-1 rounded-lg border border-[var(--nw-glass-border)] bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                     />
@@ -203,6 +199,15 @@ export function LlmConfigCard() {
                     </div>
                 ) : null}
             </div>
+
+            <button
+                type="button"
+                onClick={save}
+                disabled={!baseUrl || !apiKey || !model}
+                className="flex items-center justify-center h-10 rounded-[10px] bg-accent text-accent-foreground hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium"
+            >
+                {t('llm.button.save')}
+            </button>
 
             <button
                 type="button"

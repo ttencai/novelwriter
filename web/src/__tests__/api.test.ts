@@ -213,6 +213,27 @@ describe('api service', () => {
     expect(headers2['X-LLM-Model']).toBe('m')
   })
 
+  it('keeps saved model config after a refresh-like module reload and uses it for LLM calls', async () => {
+    localStorage.setItem('novwr_llm_config_v1', JSON.stringify({
+      baseUrl: 'https://saved.example/v1',
+      apiKey: 'sk-saved',
+      model: 'gpt-saved',
+    }))
+    vi.resetModules()
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    const { api: freshApi } = await import('@/services/api')
+
+    await freshApi.testLlmConnection()
+
+    const init = fetchSpy.mock.calls[0][1]
+    const headers = init.headers as Record<string, string>
+    expect(headers['X-LLM-Base-Url']).toBe('https://saved.example/v1')
+    expect(headers['X-LLM-Api-Key']).toBe('sk-saved')
+    expect(headers['X-LLM-Model']).toBe('gpt-saved')
+  })
+
   it('streamContinuation attaches BYOK LLM headers', async () => {
     setLlmConfig({ baseUrl: 'http://example.com/v1', apiKey: 'sk-test', model: 'm' })
 

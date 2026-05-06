@@ -124,8 +124,8 @@ const relativeTimeZhMessages = {
 } as const satisfies Record<string, UiMessageValue>
 
 const llmZhMessages = {
-  'llm.notice.hosted': '在线版也支持填写你自己的 API Key，但请先知晓风险：密钥会在模型请求时通过当前实例服务器转发到你配置的 OpenAI 兼容接口。当前实现不会把这类用户自带密钥持久化到浏览器或服务端；它只保留在当前标签页内存里，刷新页面后会清空。如果你对当前部署实例的运维环境不完全信任，建议不要在在线版填写，改用 Docker 自部署。',
-  'llm.notice.selfhost': '出于安全考虑，这里的配置只保留在当前浏览器标签页内存中；刷新页面后会清空。如果你想长期使用自己的 Key，推荐改用 Docker / 环境变量自部署。',
+  'llm.notice.hosted': '在线版也支持填写你自己的 API Key，但请先知晓风险：密钥会在模型请求时通过当前实例服务器转发到你配置的 OpenAI 兼容接口。点击“保存配置”后，配置会保存在当前浏览器本地存储中，刷新页面后仍会保留。',
+  'llm.notice.selfhost': '点击“保存配置”后，当前 Base URL、API Key 和模型名会保存在这个浏览器的本地存储中，刷新页面后仍会保留。也可以继续使用 Docker / 环境变量作为默认配置。',
   'llm.warning.partialConfig': '当前只填写了部分 BYOK 配置。请同时填写 Base URL、API Key 和 Model；否则续写、世界生成和提取都会被拒绝。',
   'llm.error.incompleteConfig': '当前 BYOK 配置不完整，请同时填写 Base URL、API Key 和 Model，或清空当前配置。',
   'llm.error.aiDisabled': '当前实例已关闭 AI 功能，暂时无法发起模型请求。',
@@ -143,9 +143,11 @@ const llmZhMessages = {
   'llm.result.modelsLoaded': ({ count }) => `已获取 ${String(count ?? 0)} 个模型`,
   'llm.result.modelsLoadFailed': '获取模型失败',
   'llm.result.modelSelected': ({ model }) => `已选择模型：${String(model ?? '')}`,
+  'llm.result.saved': '模型配置已保存，刷新页面后仍会保留。',
+  'llm.button.save': '保存配置',
   'llm.button.testing': '测试中...',
   'llm.button.test': '测试连接',
-  'llm.button.clear': '清空当前标签页配置',
+  'llm.button.clear': '清空已保存配置',
 } as const satisfies Record<string, UiMessageValue>
 
 const feedbackZhMessages = {
@@ -288,8 +290,8 @@ const enMessages: Partial<Record<UiMessageKey, UiMessageValue>> = {
   'time.weeksAgo': ({ count }) => `${String(count ?? 0)} ${Number(count) === 1 ? 'week' : 'weeks'} ago`,
   'time.monthsAgo': ({ count }) => `${String(count ?? 0)} ${Number(count) === 1 ? 'month' : 'months'} ago`,
 
-  'llm.notice.hosted': 'The hosted app also lets you use your own API key, but understand the risk first: when you send model requests, the key is proxied through this instance to the OpenAI-compatible endpoint you configured. The current implementation does not persist user-provided keys in the browser or on the server; it only keeps them in the current tab’s memory and clears them on refresh. If you do not fully trust the operator of this deployment, avoid entering your key here and use Docker self-hosting instead.',
-  'llm.notice.selfhost': 'For safety, this configuration is kept only in the current browser tab’s memory and is cleared on refresh. If you want to use your own key long-term, self-host with Docker or environment variables instead.',
+  'llm.notice.hosted': 'The hosted app also lets you use your own API key, but understand the risk first: model requests are proxied through this instance to your OpenAI-compatible endpoint. After you click “Save config”, the config is stored in this browser and remains after refresh.',
+  'llm.notice.selfhost': 'After you click “Save config”, the Base URL, API key, and model name are stored in this browser and remain after refresh. Docker / environment variables can still provide the defaults.',
   'llm.warning.partialConfig': 'Only part of the BYOK config is filled in. Provide Base URL, API Key, and Model together; otherwise continuation, world generation, and extraction will be rejected.',
   'llm.error.incompleteConfig': 'The current BYOK config is incomplete. Fill in Base URL, API Key, and Model together, or clear the current config.',
   'llm.error.aiDisabled': 'AI is disabled on this instance, so model requests are unavailable right now.',
@@ -307,9 +309,11 @@ const enMessages: Partial<Record<UiMessageKey, UiMessageValue>> = {
   'llm.result.modelsLoaded': ({ count }) => `Loaded ${String(count ?? 0)} models`,
   'llm.result.modelsLoadFailed': 'Failed to fetch models',
   'llm.result.modelSelected': ({ model }) => `Selected model: ${String(model ?? '')}`,
+  'llm.result.saved': 'Model config saved. It will remain after refreshing the page.',
+  'llm.button.save': 'Save config',
   'llm.button.testing': 'Testing...',
   'llm.button.test': 'Test connection',
-  'llm.button.clear': 'Clear current tab config',
+  'llm.button.clear': 'Clear saved config',
 
   'feedback.title': 'Product feedback',
   'feedback.description': 'Submit the form below to earn extra generation quota. Your feedback helps us a lot.',
