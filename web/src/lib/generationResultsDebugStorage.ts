@@ -4,6 +4,12 @@ import { normalizePostcheckWarning, normalizeProseWarning } from '@/lib/postchec
 const DEBUG_STORAGE_PREFIX = 'novwr_gen_debug_'
 const WARNING_STORAGE_PREFIX = 'novwr_gen_warnings_'
 
+function storageKey(prefix: string, novelId: number | null, continuations: string): string {
+  return novelId != null && Number.isFinite(novelId) && novelId > 0
+    ? `${prefix}${novelId}_${continuations}`
+    : `${prefix}${continuations}`
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -55,17 +61,17 @@ function normalizeContinueDebugSummary(value: unknown): ContinueDebugSummary | n
   }
 }
 
-export function saveGenerationResultsDebug(continuations: string, debug: ContinueDebugSummary) {
+export function saveGenerationResultsDebug(novelId: number, continuations: string, debug: ContinueDebugSummary) {
   try {
-    sessionStorage.setItem(`${DEBUG_STORAGE_PREFIX}${continuations}`, JSON.stringify(debug))
+    sessionStorage.setItem(storageKey(DEBUG_STORAGE_PREFIX, novelId, continuations), JSON.stringify(debug))
   } catch {
     // Ignore storage failures; results reload can still fall back to the URL ids.
   }
 }
 
-export function readGenerationResultsDebug(continuations: string): ContinueDebugSummary | null {
+export function readGenerationResultsDebug(novelId: number, continuations: string): ContinueDebugSummary | null {
   try {
-    const raw = sessionStorage.getItem(`${DEBUG_STORAGE_PREFIX}${continuations}`)
+    const raw = sessionStorage.getItem(storageKey(DEBUG_STORAGE_PREFIX, novelId, continuations))
     if (!raw) return null
     return normalizeContinueDebugSummary(JSON.parse(raw))
   } catch {
@@ -73,12 +79,12 @@ export function readGenerationResultsDebug(continuations: string): ContinueDebug
   }
 }
 
-export function readGenerationResultsWarnings(continuations: string): PostcheckWarning[] {
-  const debug = readGenerationResultsDebug(continuations)
+export function readGenerationResultsWarnings(novelId: number, continuations: string): PostcheckWarning[] {
+  const debug = readGenerationResultsDebug(novelId, continuations)
   if (debug) return debug.drift_warnings
 
   try {
-    const raw = sessionStorage.getItem(`${WARNING_STORAGE_PREFIX}${continuations}`)
+    const raw = sessionStorage.getItem(storageKey(WARNING_STORAGE_PREFIX, novelId, continuations))
     if (!raw) return []
     return normalizePostcheckWarnings(JSON.parse(raw))
   } catch {

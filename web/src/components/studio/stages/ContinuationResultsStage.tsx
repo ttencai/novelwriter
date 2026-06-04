@@ -60,8 +60,10 @@ export function ContinuationResultsStage({
     studioResultsDebug?: ContinueDebugSummary | null
   } | null
 
-  const legacyResponse = state?.response
+  const stateBelongsToNovel = state?.novelId === novelId
+  const legacyResponse = stateBelongsToNovel ? state?.response : undefined
   const legacyVersions: Continuation[] = legacyResponse?.continuations ?? []
+  const scopedStudioResultsDebug = stateBelongsToNovel ? state?.studioResultsDebug ?? null : null
 
   const searchParams = new URLSearchParams(location.search)
   const persisted = searchParams.get('continuations')
@@ -80,7 +82,7 @@ export function ContinuationResultsStage({
   >(undefined)
   if (initialStreamRef.current === undefined) {
     initialStreamRef.current =
-      !persisted && state?.streamParams && state?.novelId
+      !persisted && state?.streamParams && state?.novelId === novelId
         ? { novelId: state.novelId, params: state.streamParams }
         : null
   }
@@ -215,7 +217,7 @@ export function ContinuationResultsStage({
               const mapping = entries.map(([variant, id]) => `${variant}:${id}`).join(',')
 
               if (mapping && total && activeChapterNum !== null) {
-                if (doneDebug) saveGenerationResultsDebug(mapping, doneDebug)
+                if (doneDebug) saveGenerationResultsDebug(novelId, mapping, doneDebug)
 
                 const currentSearchParams = new URLSearchParams(latestLocationRef.current.search)
                 const currentStage = currentSearchParams.get('stage')
@@ -280,14 +282,14 @@ export function ContinuationResultsStage({
       abortRef.current = true
       ctrl.abort()
     }
-  }, [activeChapterNum, locale, navigate, streamAttempt, streamCtx, t])
+  }, [activeChapterNum, locale, navigate, novelId, streamAttempt, streamCtx, t])
 
   useEffect(() => {
     if (!isReloadMode || !persisted) return
 
-    const storedDebug = readGenerationResultsDebug(persisted)
+    const storedDebug = readGenerationResultsDebug(novelId, persisted)
     setPersistedDebug(storedDebug)
-    setReloadedWarnings(readGenerationResultsWarnings(persisted))
+    setReloadedWarnings(readGenerationResultsWarnings(novelId, persisted))
 
     const ids = persisted
       .split(',')
@@ -317,7 +319,7 @@ export function ContinuationResultsStage({
   const allDone = isLegacyMode || isDone
   const tabCount = isStreamMode ? variants.length : nonStreamVersions.length
 
-  const debug = isStreamMode ? streamDebug : legacyResponse?.debug ?? persistedDebug ?? state?.studioResultsDebug ?? null
+  const debug = isStreamMode ? streamDebug : legacyResponse?.debug ?? persistedDebug ?? scopedStudioResultsDebug
   const summary = debug
     ? {
       entities: debug.injected_entities.length,
@@ -336,7 +338,7 @@ export function ContinuationResultsStage({
       { content: currentContent, chapter_number: (latestChapterNum ?? 0) + 1 },
       {
         onSuccess: (chapter) => {
-          const currentDebug = isStreamMode ? streamDebug : legacyResponse?.debug ?? persistedDebug ?? state?.studioResultsDebug ?? null
+          const currentDebug = isStreamMode ? streamDebug : legacyResponse?.debug ?? persistedDebug ?? scopedStudioResultsDebug
           const allWarnings = currentDebug?.drift_warnings ?? (reloadedWarnings.length > 0 ? reloadedWarnings : undefined)
           if (allWarnings?.length) {
             const targetVersion = activeTab + 1
@@ -362,7 +364,7 @@ export function ContinuationResultsStage({
     novelId,
     persistedDebug,
     reloadedWarnings,
-    state?.studioResultsDebug,
+    scopedStudioResultsDebug,
     streamDebug,
     whitelist,
   ])
@@ -677,7 +679,7 @@ export function ContinuationResultsStage({
         {(() => {
           const proseWarnings: ProseWarning[] | undefined = isStreamMode
             ? (isDone ? streamDebug?.prose_warnings : undefined)
-            : (legacyResponse?.debug?.prose_warnings ?? persistedDebug?.prose_warnings ?? state?.studioResultsDebug?.prose_warnings)
+            : (legacyResponse?.debug?.prose_warnings ?? persistedDebug?.prose_warnings ?? scopedStudioResultsDebug?.prose_warnings)
           const targetVersion = activeTab + 1
           const filtered = proseWarnings?.filter((w) => w.version == null || w.version === targetVersion) ?? []
           if (filtered.length === 0) return null

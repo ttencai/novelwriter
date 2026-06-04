@@ -433,10 +433,10 @@ class TestInviteRegistration:
         finally:
             db.close()
 
-    def test_preferences_context_chapters_above_cap_is_clamped_to_five(self, hosted_client):
+    def test_preferences_context_chapters_uses_requested_value(self, hosted_client):
         resp = hosted_client.post("/api/auth/invite", json={
             "invite_code": "TEST-CODE-123",
-            "nickname": "偏好上限测试",
+            "nickname": "偏好章节数测试",
         })
         token = resp.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
@@ -447,7 +447,7 @@ class TestInviteRegistration:
             headers=headers,
         )
         assert patch_resp.status_code == 200
-        assert patch_resp.json()["preferences"]["context_chapters"] == 5
+        assert patch_resp.json()["preferences"]["context_chapters"] == 99
 
 
 class TestQuota:

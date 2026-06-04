@@ -369,6 +369,9 @@ export function NovelStudioPage() {
     locationState?.streamParams != null
     && locationState?.novelId === novelId
   )
+  const scopedStudioResultsDebug = locationState?.novelId === novelId
+    ? locationState.studioResultsDebug ?? null
+    : null
   const hasResultsContext = activeStage === 'results' || resultsProvenance !== null || hasEphemeralResultsContext
   const currentResultsDebugKey = useMemo(() => {
     if (effectiveResultsProvenance) return `persisted:${effectiveResultsProvenance.continuations}`
@@ -384,10 +387,10 @@ export function NovelStudioPage() {
         ? null
         : liveResultsDebug
         ?? (effectiveResultsProvenance
-          ? readGenerationResultsDebug(effectiveResultsProvenance.continuations) ?? locationState?.studioResultsDebug ?? null
-          : locationState?.studioResultsDebug ?? null)
+          ? readGenerationResultsDebug(novelId, effectiveResultsProvenance.continuations) ?? scopedStudioResultsDebug
+          : scopedStudioResultsDebug)
     ),
-    [effectiveResultsProvenance, hasResultsContext, liveResultsDebug, locationState?.studioResultsDebug],
+    [effectiveResultsProvenance, hasResultsContext, liveResultsDebug, novelId, scopedStudioResultsDebug],
   )
   const injectionSummaryPanelState = useMemo(() => {
     if (!resultsDebug) return null
@@ -735,6 +738,7 @@ export function NovelStudioPage() {
             {hasResultsContext ? (
               <div className={activeStage === 'results' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
                 <ContinuationResultsStage
+                  key={novelId}
                   novelId={novelId}
                   activeChapterNum={activeChapterNum}
                   activeChapterReference={activeChapterReference}

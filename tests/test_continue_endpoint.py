@@ -193,6 +193,58 @@ class TestContinueEndpoint:
         cont = db.query(Continuation).filter(Continuation.novel_id == novel.id).one()
         assert "<world_knowledge>" in cont.prompt_used
 
+    def test_continue_context_is_isolated_by_novel_id(self, client, db, novel, world):
+        c, captured = client
+
+        other = Novel(title="第二本书", author="作者", file_path="/tmp/second.txt", total_chapters=1)
+        db.add(other)
+        db.commit()
+        db.refresh(other)
+        db.add(
+            Chapter(
+                novel_id=other.id,
+                chapter_number=1,
+                title="第一章",
+                content="白鹿城的许南独自推开城门。",
+            )
+        )
+        db.commit()
+
+        second_entity = WorldEntity(
+            novel_id=other.id,
+            name="许南",
+            entity_type="Character",
+            description="第二本书主角",
+            status="confirmed",
+        )
+        second_system = WorldSystem(
+            novel_id=other.id,
+            name="白鹿城规",
+            display_type="list",
+            description="第二本书专属设定",
+            data={"items": [{"label": "城门三响", "visibility": "active"}]},
+            constraints=["不得提及玄气修炼"],
+            visibility="active",
+            status="confirmed",
+        )
+        db.add_all([second_entity, second_system])
+        db.commit()
+
+        resp = c.post(
+            f"/api/novels/{other.id}/continue",
+            json={"num_versions": 1, "context_chapters": 1},
+        )
+
+        assert resp.status_code == 200
+        prompt_used = str(captured.get("prompt") or "")
+        assert "第二本书" in prompt_used
+        assert "白鹿城规" in prompt_used
+        assert "许南" in prompt_used
+        assert "逆天邪神" not in prompt_used
+        assert "修炼体系" not in prompt_used
+        assert "云澈" not in prompt_used
+        assert "楚月仙" not in prompt_used
+
     def test_response_debug_uses_split_warning_keys(self, client, novel, monkeypatch):
         c, _ = client
 
@@ -389,7 +441,7 @@ class TestContinueEndpoint:
         assert "<world_knowledge>" in prompt_used
         assert "云澈" in prompt_used
 
-    def test_context_chapters_above_cap_falls_back_to_five(self, client, db, novel):
+    def test_context_chapters_uses_requested_value(self, client, db, novel):
         c, _captured = client
 
         for idx in range(3, 8):
@@ -410,7 +462,7 @@ class TestContinueEndpoint:
         assert resp.status_code == 200
         data = resp.json()
 
-        assert data["debug"]["context_chapters"] == 5
+        assert data["debug"]["context_chapters"] == 99
 
 
 class TestContinueStreamEndpoint:

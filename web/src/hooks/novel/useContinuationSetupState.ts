@@ -69,6 +69,19 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
   const [numVersions, setNumVersions] = useState('1')
   const [temperature, setTemperature] = useState('0.8')
   const [prefsLoaded, setPrefsLoaded] = useState(false)
+  const previousNovelIdRef = useRef(novelId)
+  const demoDefaultApplied = useRef(false)
+
+  // React Router keeps NovelStudioPage mounted when only :novelId changes.
+  // Clear per-book prompt state explicitly so a continuation instruction from
+  // one book cannot be sent with another book's request.
+  useEffect(() => {
+    if (previousNovelIdRef.current === novelId) return
+    previousNovelIdRef.current = novelId
+    demoDefaultApplied.current = false
+    setInstruction('')
+    setAdvancedOpen(false)
+  }, [novelId])
 
   // Load user preferences as defaults (once)
   useEffect(() => {
@@ -93,7 +106,6 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
   }, [user?.preferences, prefsLoaded])
 
   // Demo novel pre-fill
-  const demoDefaultApplied = useRef(false)
   useEffect(() => {
     if (!novelId || demoDefaultApplied.current) return
     let cancelled = false

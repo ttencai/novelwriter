@@ -135,7 +135,7 @@ class ContinueRequest(BaseModel):
     context_chapters: int | None = Field(
         default=None,
         ge=1,
-        description=f"用于续写上下文的最近章节数（仅允许 1-{MAX_CONTEXT_CHAPTERS}，超过时按 {MAX_CONTEXT_CHAPTERS} 处理）",
+        description="用于续写上下文的最近章节数（最少 1，填写多少就使用多少）",
     )
     temperature: float | None = Field(
         default=None,
