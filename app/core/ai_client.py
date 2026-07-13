@@ -287,6 +287,18 @@ async def _collect_response_stream_text(stream: Any) -> tuple[str, Any, int, int
     return text, response, prompt_tokens, completion_tokens, finish_reason
 
 
+def _reasoning_kwargs(reasoning_effort: str | None) -> dict[str, Any]:
+    if reasoning_effort in {"low", "medium", "high"}:
+        return {"reasoning": {"effort": reasoning_effort}}
+    return {}
+
+
+def _chat_reasoning_kwargs(reasoning_effort: str | None) -> dict[str, Any]:
+    if reasoning_effort in {"low", "medium", "high"}:
+        return {"reasoning_effort": reasoning_effort}
+    return {}
+
+
 class AIClient:
     @property
     def settings(self):

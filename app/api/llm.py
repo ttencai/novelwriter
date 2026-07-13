@@ -11,10 +11,12 @@ from app.config import get_settings
 from app.database import get_db
 from app.core.auth import get_current_user_or_default
 from app.core.ai_client import (
+    _chat_reasoning_kwargs,
     _collect_response_stream_text,
     _extract_response_text,
     _extract_usage_pair,
     _normalize_base_url,
+    _reasoning_kwargs,
     _record_usage,
     _resolve_billing_source,
     _responses_unsupported,
@@ -224,6 +226,7 @@ async def test_llm_connection(
     )
 
     start = time.perf_counter()
+    reasoning_effort = config.get("reasoning_effort")
     capabilities = {"basic": False, "stream": False, "json_mode": False}
     errors: dict[str, str] = {}
     try:
@@ -233,6 +236,7 @@ async def test_llm_connection(
                 input="hi",
                 max_output_tokens=4,
                 stream=True,
+                **_reasoning_kwargs(reasoning_effort),
             )
             raw, _response, prompt_tokens, completion_tokens, _finish_reason = await _collect_response_stream_text(stream)
             if not raw.strip():
@@ -240,6 +244,7 @@ async def test_llm_connection(
                     model=config["model"],
                     input="hi",
                     max_output_tokens=1,
+                    **_reasoning_kwargs(reasoning_effort),
                 )
                 raw = (_extract_response_text(response) or "").strip()
                 prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
@@ -253,6 +258,7 @@ async def test_llm_connection(
                 model=config["model"],
                 messages=[{"role": "user", "content": "hi"}],
                 max_tokens=4,
+                **_chat_reasoning_kwargs(reasoning_effort),
             )
             raw = (response.choices[0].message.content or "").strip() if response.choices else ""
             if not raw:
