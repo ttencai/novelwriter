@@ -193,7 +193,17 @@ def _tool_call_unsupported(exc: Exception) -> bool:
 
 
 def _responses_unsupported(exc: Exception) -> bool:
+    # Some OpenAI-compatible gateways expose ``client.responses`` through the
+    # SDK but do not actually implement the Responses API. Depending on the
+    # gateway/SDK combination this can surface as a TypeError or a bare 422
+    # without a useful "unsupported" message. Both cases should fall back to
+    # Chat Completions, which is the compatibility path used by the app.
+    if isinstance(exc, (AttributeError, TypeError)):
+        return True
+
     status_code = getattr(exc, "status_code", None)
+    if status_code in {404, 405, 422}:
+        return True
     if status_code not in {None, 400, 404, 405, 422}:
         return False
     message = str(exc).lower()

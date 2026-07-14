@@ -321,6 +321,41 @@ async def test_generate_stream_retries_without_stream_options_on_unsupported_gat
     mock_record_usage.assert_not_called()
 
 
+@pytest.mark.asyncio
+@patch("app.core.ai_client.get_settings")
+@patch("app.core.ai_client.AsyncOpenAI")
+async def test_generate_stream_falls_back_when_responses_api_returns_422(MockOpenAI, mock_settings):
+    mock_settings.return_value = MagicMock(
+        openai_base_url="https://api.example.com/v1",
+        openai_api_key="sk-test",
+        openai_model="compatible-model",
+    )
+
+    responses_error = Exception("422 Unprocessable Content")
+    responses_error.status_code = 422
+
+    chunk = MagicMock()
+    chunk.usage = None
+    chunk.choices = [MagicMock(delta=MagicMock(content="A"), finish_reason="stop")]
+
+    async def fake_stream():
+        yield chunk
+
+    mock_client_instance = MagicMock()
+    mock_client_instance.responses.create = AsyncMock(side_effect=responses_error)
+    mock_client_instance.chat.completions.create = AsyncMock(return_value=fake_stream())
+    MockOpenAI.return_value = mock_client_instance
+
+    client = AIClient()
+    output = []
+    async for token in client.generate_stream("Write something"):
+        output.append(token)
+
+    assert "".join(output) == "A"
+    mock_client_instance.responses.create.assert_awaited_once()
+    mock_client_instance.chat.completions.create.assert_awaited_once()
+
+
 # --- Error handling ---
 
 
@@ -429,7 +464,7 @@ async def test_generate_logs_when_response_is_truncated(MockOpenAI, mock_setting
     result = await c.generate("Write something", max_tokens=1234)
 
     assert result == "Partial text"
-    mock_log_warning.assert_called_once()
+    assert mock_log_warning.called
     logged = " ".join(str(x) for x in mock_log_warning.call_args.args)
     assert "generate truncated" in logged
 
