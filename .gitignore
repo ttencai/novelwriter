@@ -117,3 +117,12 @@ test-results/
 .agent/
 test-results/
 .agent/
+# Runtime per-user skills
+data/skills/users/
+
+# Local writing materials and launch helpers
+data/原文/
+data/去AI参考/
+start-backend.bat
+start-dev.bat
+start-frontend.bat

@@ -19,10 +19,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function llmHeaders(): HeadersInit {
   const headers: Record<string, string> = {}
-  const { baseUrl, apiKey, model } = getLlmConfig()
+  const { baseUrl, apiKey, model, reasoningEffort } = getLlmConfig()
   if (baseUrl) headers['X-LLM-Base-Url'] = baseUrl
   if (apiKey) headers['X-LLM-Api-Key'] = apiKey
   if (model) headers['X-LLM-Model'] = model
+  if (reasoningEffort) headers['X-LLM-Reasoning-Effort'] = reasoningEffort
   return headers
 }
 

@@ -31,6 +31,11 @@ from app.schemas import (
     ChapterCreateRequest,
     ChapterUpdateRequest,
     ContinuationResponse,
+    ContinuationContentUpdateRequest,
+    ContinuationPolishResponse,
+    ContinuationReviewRequest,
+    ContinuationReviewResponse,
+    ContinuationRewriteRequest,
     ContinueDebugSummary,
     ContinueRequest,
     ContinueResponse,
@@ -51,6 +56,8 @@ from app.core.continuation_text import (
     format_world_context_for_prompt,
 )
 from app.core.generator import continue_novel, continue_novel_stream
+from app.core.ai_client import ai_client
+from app.core.skills import load_common_novel_writing_skill
 from app.core.chapter_numbering import get_next_missing_chapter_number
 from app.core.indexing.lifecycle import (
     WindowIndexLifecycleSnapshot,
@@ -403,6 +410,174 @@ def _build_advisory_continuation_warning_update(
             update["prose_warnings"] = prose_warnings
 
     return update
+
+
+_POLISH_CODE_FENCE_RE = re.compile(r"^\s*```(?:text|markdown|md)?\s*|\s*```\s*$", re.IGNORECASE)
+
+
+def _clean_polished_continuation(text: str) -> str:
+    cleaned = (text or "").strip()
+    cleaned = _POLISH_CODE_FENCE_RE.sub("", cleaned).strip()
+    for prefix in ("去AI味版本：", "最终稿：", "改写稿：", "润色后：", "正文："):
+        if cleaned.startswith(prefix):
+            cleaned = cleaned[len(prefix):].strip()
+    return cleaned
+
+
+def _get_continuation_for_user(
+    db: Session,
+    novel_id: int,
+    continuation_id: int,
+    current_user: User,
+) -> Continuation:
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    _verify_novel_access(novel, current_user)
+    continuation = (
+        db.query(Continuation)
+        .filter(Continuation.novel_id == novel_id, Continuation.id == continuation_id)
+        .first()
+    )
+    if not continuation:
+        raise HTTPException(status_code=404, detail="Continuation not found")
+    return continuation
+
+
+def _build_deai_system_prompt() -> str:
+    skill = load_common_novel_writing_skill("novel-de-ai")
+    fallback = """
+你是网文正文去AI味编辑。任务是低改动处理续写草稿里的明显AI腔。
+
+规则：
+- 只输出处理后的正文，不要输出标题、说明、评分、分析。
+- 保留原剧情、人物关系、事件顺序和关键信息，不新增剧情，不删核心内容。
+- 不要整体重写，不要把文本改得更顺、更干净。
+- 保留原文的粗糙感、口语感、重复和段落习惯。
+- 只定点处理空泛升华、说明文总结、模板句式、角色科普式台词。
+- 不要把文本改成说明文，不要故意写错别字。
+""".strip()
+    if not skill:
+        return fallback
+    return (
+        "你是网文正文去AI味编辑。严格按下面的去AI味 skill 处理文本。\n"
+        "只输出处理后的正文，不要输出标题、说明、评分、分析。\n\n"
+        f"{skill}"
+    )
+
+
+def _build_deai_user_prompt(content: str) -> str:
+    return content
+
+
+def _clean_review_text(text: str) -> str:
+    cleaned = (text or "").strip()
+    cleaned = _POLISH_CODE_FENCE_RE.sub("", cleaned).strip()
+    return cleaned
+
+
+def _llm_config_with_model(llm_config: dict | None, model: str | None) -> dict:
+    kwargs = dict(llm_config or {})
+    selected = (model or "").strip()
+    if selected:
+        kwargs["model"] = selected
+    return kwargs
+
+
+def _build_review_system_prompt() -> str:
+    return """你是小说审稿编辑，只负责把续写草稿整理成可验收的修改清单。
+
+要求：
+- 不要续写，不要改写正文。
+- 只找最影响读者阅读体验的 1-3 个问题，宁少勿多。
+- 每个问题都必须能被下一次重写明确处理。
+- 不要空泛夸奖，不要写长篇理论。
+- 如果输入里包含上一轮审稿意见，先复检上一轮意见是否已解决；已解决的问题不要重复提出。
+- 除非发现严重新问题，否则不要在复检时发散出一批新建议。
+- 输出中文。
+
+输出格式：
+【验收结论】通过 / 需重写，并用一句话说明原因。
+【待处理问题】最多 3 条。每条按“问题 / 原文证据 / 修改目标 / 优先级”写。
+【必须保留】列出重写时不能改掉的剧情、人物关系、有效句子或风格。
+【重写任务】把上面问题压缩成 1 段可直接交给写作模型执行的指令。
+""".strip()
+
+
+_REVIEW_TAG_RE = re.compile(r"<review>\s*(.*?)\s*</review>", re.DOTALL)
+_REWRITE_INSTRUCTION_TAG_RE = re.compile(
+    r"<rewrite_instruction>\s*(.*?)\s*</rewrite_instruction>",
+    re.DOTALL,
+)
+
+
+def _extract_prior_review_context(prompt_used: str | None) -> str:
+    if not prompt_used:
+        return ""
+    review_match = _REVIEW_TAG_RE.search(prompt_used)
+    instruction_match = _REWRITE_INSTRUCTION_TAG_RE.search(prompt_used)
+    sections: list[str] = []
+    if review_match and review_match.group(1).strip():
+        sections.append(f"上一轮审稿意见：\n{review_match.group(1).strip()}")
+    if instruction_match and instruction_match.group(1).strip():
+        sections.append(f"上一轮重写任务：\n{instruction_match.group(1).strip()}")
+    return "\n\n".join(sections).strip()
+
+
+def _build_review_user_prompt(content: str, prior_review_context: str | None = None) -> str:
+    prior_section = ""
+    if prior_review_context and prior_review_context.strip():
+        prior_section = f"""
+<previous_review_context>
+{prior_review_context.strip()}
+</previous_review_context>
+
+请先判断上一轮意见是否已经解决。已解决的问题不要重复提出；只保留仍未解决的问题。
+"""
+    return f"""请审核下面这段续写结果，并给出可用于下一次重写的审稿意见。
+{prior_section}
+
+<continuation>
+{content}
+</continuation>
+"""
+
+
+def _build_review_rewrite_system_prompt() -> str:
+    return """你是小说续写重写助手。
+
+规则：
+- 只输出重写后的正文，不要输出说明、标题、审稿意见或 Markdown。
+- 以原续写为基础重写，不要偏离原剧情和人物关系。
+- 必须逐条处理审稿意见中的待处理问题，不能另起炉灶写一版无关正文。
+- 保留审稿意见要求保留的内容。
+- 不要新增审稿意见之外的大段剧情、人物、设定或冲突。
+- 如果某条意见无法处理，用最小改动绕开，不要整体重写。
+- 保持网文正文叙事，不要写成分析文。
+""".strip()
+
+
+def _build_review_rewrite_user_prompt(content: str, review_text: str, rewrite_instruction: str | None = None) -> str:
+    instruction = (rewrite_instruction or review_text or "").strip()
+    return f"""请根据审稿意见，重写下面这段续写正文。
+
+执行要求：
+1. 逐条处理 <review> 中的【待处理问题】或【重写任务】。
+2. 保留 <review> 中【必须保留】的内容。
+3. 以 <draft> 为底稿改写，不要生成一段和审稿意见无关的新正文。
+4. 优先减少下一轮审稿还会提出的同类问题。
+5. 只输出重写后的正文。
+
+<review>
+{review_text.strip()}
+</review>
+
+<rewrite_instruction>
+{instruction}
+</rewrite_instruction>
+
+<draft>
+{content}
+</draft>
+"""
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -947,7 +1122,11 @@ async def continue_novel_stream_endpoint(
     """Stream continuation generation via NDJSON."""
     current_user = _quota_user
     settings = get_settings()
-    if settings.deploy_mode != "selfhost" and current_user.generation_quota < req.num_versions:
+    if (
+        settings.generation_quota_enabled
+        and settings.deploy_mode != "selfhost"
+        and current_user.generation_quota < req.num_versions
+    ):
         raise HTTPException(
             status_code=429,
             detail=(
@@ -994,7 +1173,7 @@ async def continue_novel_stream_endpoint(
                 request_id=request_id,
                 temperature=req.temperature,
                 user_id=current_user.id,
-            ):
+                ):
                 if event.get("type") == "start":
                     try:
                         total_variants = int(event.get("total_variants") or req.num_versions)
@@ -1038,6 +1217,203 @@ async def continue_novel_stream_endpoint(
             release_llm_slot()
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+
+
+@router.post(
+    "/{novel_id}/continuations/{continuation_id}/deai",
+    response_model=ContinuationPolishResponse,
+)
+async def deai_continuation(
+    novel_id: int,
+    continuation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_default),
+    llm_config: dict | None = Depends(get_llm_config),
+    _quota_user: User = Depends(check_generation_quota),
+):
+    """De-AI one saved continuation with the common novel-de-ai skill."""
+    current_user = _quota_user
+    continuation = _get_continuation_for_user(db, novel_id, continuation_id, current_user)
+    original_content = (continuation.content or "").strip()
+    if not original_content:
+        raise HTTPException(status_code=400, detail="Continuation content is empty")
+
+    await acquire_llm_slot()
+    quota = QuotaScope(db, current_user.id, count=1)
+    try:
+        quota.reserve()
+        settings = get_settings()
+        max_tokens = min(
+            settings.max_continuation_tokens,
+            max(1000, int(len(original_content) * 2.2)),
+        )
+        llm_kwargs = llm_config or {}
+        polished_content = await ai_client.generate(
+            prompt=_build_deai_user_prompt(original_content),
+            system_prompt=_build_deai_system_prompt(),
+            max_tokens=max_tokens,
+            user_id=current_user.id,
+            **llm_kwargs,
+        )
+        polished_content = _clean_polished_continuation(polished_content)
+        if not polished_content:
+            raise RuntimeError("polished content is empty")
+        quota.charge(1)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("deai_continuation failed for novel %s continuation %s", novel_id, continuation_id)
+        raise HTTPException(status_code=500, detail="De-AI rewrite failed")
+    finally:
+        quota.finalize()
+        release_llm_slot()
+
+    record_event(db, current_user.id, "continuation_deai", novel_id=novel_id, meta={"continuation_id": continuation_id})
+    return ContinuationPolishResponse(
+        continuation_id=continuation_id,
+        original_content=original_content,
+        polished_content=polished_content,
+    )
+
+
+@router.post(
+    "/{novel_id}/continuations/{continuation_id}/review",
+    response_model=ContinuationReviewResponse,
+)
+async def review_continuation(
+    novel_id: int,
+    continuation_id: int,
+    req: ContinuationReviewRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_default),
+    llm_config: dict | None = Depends(get_llm_config),
+    _quota_user: User = Depends(check_generation_quota),
+):
+    """Review one continuation with an optional reviewer model."""
+    current_user = _quota_user
+    continuation = _get_continuation_for_user(db, novel_id, continuation_id, current_user)
+    original_content = (continuation.content or "").strip()
+    if not original_content:
+        raise HTTPException(status_code=400, detail="Continuation content is empty")
+
+    await acquire_llm_slot()
+    quota = QuotaScope(db, current_user.id, count=1)
+    try:
+        quota.reserve()
+        llm_kwargs = _llm_config_with_model(llm_config, req.reviewer_model)
+        prior_review_context = _extract_prior_review_context(continuation.prompt_used)
+        review_text = await ai_client.generate(
+            prompt=_build_review_user_prompt(original_content, prior_review_context),
+            system_prompt=_build_review_system_prompt(),
+            max_tokens=2200,
+            user_id=current_user.id,
+            **llm_kwargs,
+        )
+        review_text = _clean_review_text(review_text)
+        if not review_text:
+            raise RuntimeError("review text is empty")
+        quota.charge(1)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("review_continuation failed for novel %s continuation %s", novel_id, continuation_id)
+        raise HTTPException(status_code=500, detail="Continuation review failed")
+    finally:
+        quota.finalize()
+        release_llm_slot()
+
+    rewrite_instruction = f"请根据以下审稿意见重写当前续写，优先修正主要问题，并保留审稿意见中要求保留的内容。\n\n{review_text}"
+    record_event(db, current_user.id, "continuation_review", novel_id=novel_id, meta={"continuation_id": continuation_id, "reviewer_model": (req.reviewer_model or "").strip() or None})
+    return ContinuationReviewResponse(
+        continuation_id=continuation_id,
+        original_content=original_content,
+        review_model=(req.reviewer_model or "").strip() or (llm_config or {}).get("model"),
+        review_text=review_text,
+        rewrite_instruction=rewrite_instruction,
+    )
+
+
+@router.post(
+    "/{novel_id}/continuations/{continuation_id}/rewrite",
+    response_model=ContinuationResponse,
+)
+async def rewrite_continuation_with_review(
+    novel_id: int,
+    continuation_id: int,
+    req: ContinuationRewriteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_default),
+    llm_config: dict | None = Depends(get_llm_config),
+    _quota_user: User = Depends(check_generation_quota),
+):
+    """Create a new continuation by rewriting the current one with review feedback."""
+    current_user = _quota_user
+    continuation = _get_continuation_for_user(db, novel_id, continuation_id, current_user)
+    original_content = (continuation.content or "").strip()
+    if not original_content:
+        raise HTTPException(status_code=400, detail="Continuation content is empty")
+
+    await acquire_llm_slot()
+    quota = QuotaScope(db, current_user.id, count=1)
+    try:
+        quota.reserve()
+        settings = get_settings()
+        max_tokens = min(
+            settings.max_continuation_tokens,
+            max(1000, int(len(original_content) * 2.4)),
+        )
+        llm_kwargs = llm_config or {}
+        rewritten = await ai_client.generate(
+            prompt=_build_review_rewrite_user_prompt(original_content, req.review_text, req.rewrite_instruction),
+            system_prompt=_build_review_rewrite_system_prompt(),
+            max_tokens=max_tokens,
+            user_id=current_user.id,
+            **llm_kwargs,
+        )
+        rewritten = _clean_polished_continuation(rewritten)
+        if not rewritten:
+            raise RuntimeError("rewritten content is empty")
+        quota.charge(1)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("rewrite_continuation_with_review failed for novel %s continuation %s", novel_id, continuation_id)
+        raise HTTPException(status_code=500, detail="Continuation rewrite failed")
+    finally:
+        quota.finalize()
+        release_llm_slot()
+
+    next_continuation = Continuation(
+        novel_id=novel_id,
+        chapter_number=continuation.chapter_number,
+        content=rewritten,
+        prompt_used=_build_review_rewrite_user_prompt(original_content, req.review_text, req.rewrite_instruction),
+    )
+    db.add(next_continuation)
+    db.commit()
+    db.refresh(next_continuation)
+    record_event(db, current_user.id, "continuation_review_rewrite", novel_id=novel_id, meta={"source_continuation_id": continuation_id, "continuation_id": next_continuation.id})
+    return next_continuation
+
+
+@router.put(
+    "/{novel_id}/continuations/{continuation_id}",
+    response_model=ContinuationResponse,
+)
+def update_continuation_content(
+    novel_id: int,
+    continuation_id: int,
+    req: ContinuationContentUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_default),
+):
+    """Replace a saved continuation's content."""
+    continuation = _get_continuation_for_user(db, novel_id, continuation_id, current_user)
+    continuation.content = req.content
+    db.commit()
+    db.refresh(continuation)
+    record_event(db, current_user.id, "continuation_update", novel_id=novel_id, meta={"continuation_id": continuation_id})
+    return continuation
 
 
 @router.get("/{novel_id}/continuations", response_model=List[ContinuationResponse])

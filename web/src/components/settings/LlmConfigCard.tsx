@@ -2,20 +2,29 @@ import { useState, useEffect } from "react"
 import { useUiLocale } from "@/contexts/UiLocaleContext"
 import { getLlmApiErrorMessage, getLlmConfigWarning } from "@/lib/llmErrorMessages"
 import { api, ApiError } from "@/services/api"
-import { translateUiMessage } from "@/lib/uiMessages"
-import { clearLlmConfig, getLlmConfig, initializeLlmConfig, setLlmConfig } from "@/lib/llmConfigStore"
+import { translateUiMessage, type UiMessageKey } from "@/lib/uiMessages"
+import { clearLlmConfig, getLlmConfig, initializeLlmConfig, setLlmConfig, type ReasoningEffort } from "@/lib/llmConfigStore"
 
 const IS_HOSTED = (import.meta.env.VITE_DEPLOY_MODE || "selfhost") === "hosted"
+
+const REASONING_EFFORT_OPTIONS: Array<{ value: ReasoningEffort; labelKey: UiMessageKey }> = [
+    { value: "", labelKey: "llm.reasoning.default" },
+    { value: "low", labelKey: "llm.reasoning.low" },
+    { value: "medium", labelKey: "llm.reasoning.medium" },
+    { value: "high", labelKey: "llm.reasoning.high" },
+]
 
 export function LlmConfigCard() {
     const { locale, t } = useUiLocale()
     const [baseUrl, setBaseUrl] = useState("")
     const [apiKey, setApiKey] = useState("")
     const [model, setModel] = useState("")
+    const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>("")
     const [testing, setTesting] = useState(false)
     const [fetchingModels, setFetchingModels] = useState(false)
     const [models, setModels] = useState<string[]>([])
     const [showModelList, setShowModelList] = useState(false)
+    const [showReasoningList, setShowReasoningList] = useState(false)
     const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
 
     useEffect(() => {
@@ -23,6 +32,7 @@ export function LlmConfigCard() {
         setBaseUrl(config.baseUrl)
         setApiKey(config.apiKey)
         setModel(config.model)
+        setReasoningEffort(config.reasoningEffort)
 
         let cancelled = false
         api.getLlmConfigDefaults()
@@ -36,6 +46,7 @@ export function LlmConfigCard() {
                 setBaseUrl(merged.baseUrl)
                 setApiKey(merged.apiKey)
                 setModel(merged.model)
+                setReasoningEffort(merged.reasoningEffort)
             })
             .catch(() => {
                 // ignore defaults load failure; local tab state still works
@@ -51,6 +62,7 @@ export function LlmConfigCard() {
             baseUrl: baseUrl.trim(),
             apiKey: apiKey.trim(),
             model: model.trim(),
+            reasoningEffort,
         })
         setResult({ ok: true, message: t('llm.result.saved') })
     }
@@ -61,10 +73,20 @@ export function LlmConfigCard() {
         setResult({ ok: true, message: translateUiMessage(locale, 'llm.result.modelSelected', { model: value }) })
     }
 
+    const selectReasoningEffort = (value: ReasoningEffort) => {
+        setReasoningEffort(value)
+        setShowReasoningList(false)
+    }
+
+    const selectedReasoningLabel = t(
+        REASONING_EFFORT_OPTIONS.find((item) => item.value === reasoningEffort)?.labelKey ?? 'llm.reasoning.default',
+    )
+
     const partialConfigWarning = getLlmConfigWarning({
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
         model: model.trim(),
+        reasoningEffort,
     }, locale)
 
     const testConnection = async () => {
@@ -200,6 +222,37 @@ export function LlmConfigCard() {
                 ) : null}
             </div>
 
+            <div className="flex flex-col gap-1.5 relative">
+                <label className="text-sm font-medium" htmlFor="llm-reasoning-effort">
+                    {t('llm.label.reasoningEffort')}
+                </label>
+                <button
+                    id="llm-reasoning-effort"
+                    type="button"
+                    onClick={() => setShowReasoningList((value) => !value)}
+                    onBlur={() => window.setTimeout(() => setShowReasoningList(false), 120)}
+                    className="flex h-10 w-full items-center justify-between rounded-lg border border-[var(--nw-glass-border)] bg-transparent px-3 text-left text-sm transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                    <span>{selectedReasoningLabel}</span>
+                    <span className="text-xs text-muted-foreground">⌄</span>
+                </button>
+                {showReasoningList ? (
+                    <div className="absolute top-full z-20 mt-1 w-full overflow-auto rounded-xl border border-[var(--nw-glass-border)] bg-[hsl(var(--background))] p-1 shadow-2xl">
+                        {REASONING_EFFORT_OPTIONS.map((item) => (
+                            <button
+                                key={item.value || 'default'}
+                                type="button"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => selectReasoningEffort(item.value)}
+                                className={`flex w-full items-center rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-[hsl(var(--muted))] ${item.value === reasoningEffort ? 'bg-[hsl(var(--muted))] text-accent' : 'text-foreground'}`}
+                            >
+                                {t(item.labelKey)}
+                            </button>
+                        ))}
+                    </div>
+                ) : null}
+            </div>
+
             <button
                 type="button"
                 onClick={save}
@@ -225,6 +278,7 @@ export function LlmConfigCard() {
                     setBaseUrl("")
                     setApiKey("")
                     setModel("")
+                    setReasoningEffort("")
                     setModels([])
                     setShowModelList(false)
                     setResult(null)

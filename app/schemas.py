@@ -4,7 +4,6 @@ from typing import Optional, List, Literal, Any
 from datetime import datetime
 from enum import Enum
 
-from app.config import MAX_CONTEXT_CHAPTERS
 from app.language import DEFAULT_LANGUAGE, normalize_copilot_interaction_locale, normalize_language_code
 from app.world_visibility import WorldVisibility, normalize_visibility
 
@@ -68,6 +67,35 @@ class WindowIndexStateResponse(BaseModel):
     job: WindowIndexJobResponse | None = None
 
 
+class SkillItemResponse(BaseModel):
+    name: str
+    enabled: bool = True
+    path: str
+    has_readme: bool = False
+    has_skill_file: bool = False
+    source: str = "user"
+
+
+class SkillGroupResponse(BaseModel):
+    name: str
+    path: str
+    skill_count: int
+    enabled_count: int
+    skills: list[SkillItemResponse]
+
+
+class SkillsSummaryResponse(BaseModel):
+    total: int
+    common: int
+    user: int
+    enabled: int
+
+
+class SkillsResponse(BaseModel):
+    summary: SkillsSummaryResponse
+    groups: list[SkillGroupResponse]
+
+
 class ChapterResponse(BaseModel):
     id: int
     novel_id: int
@@ -129,7 +157,7 @@ class ContinuationResponse(BaseModel):
 
 class ContinueRequest(BaseModel):
     num_versions: int = Field(default=1, ge=1, le=2)
-    prompt: str | None = Field(default=None, max_length=2000, description="用户续写指令")
+    prompt: str | None = Field(default=None, max_length=20_000, description="用户续写指令")
     max_tokens: int | None = Field(default=None, ge=100, le=16000, description="生成的最大 token 数")
     target_chars: int | None = Field(default=None, ge=1, description="Target continuation length in characters")
     context_chapters: int | None = Field(
@@ -203,6 +231,33 @@ class ContinueDebugSummary(BaseModel):
 class ContinueResponse(BaseModel):
     continuations: List[ContinuationResponse]
     debug: ContinueDebugSummary
+
+
+class ContinuationPolishResponse(BaseModel):
+    continuation_id: int
+    original_content: str
+    polished_content: str
+
+
+class ContinuationReviewRequest(BaseModel):
+    reviewer_model: str | None = Field(default=None, max_length=200)
+
+
+class ContinuationReviewResponse(BaseModel):
+    continuation_id: int
+    original_content: str
+    review_model: str | None = None
+    review_text: str
+    rewrite_instruction: str
+
+
+class ContinuationRewriteRequest(BaseModel):
+    review_text: str = Field(min_length=1, max_length=20_000)
+    rewrite_instruction: str | None = Field(default=None, max_length=20_000)
+
+
+class ContinuationContentUpdateRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=200_000)
 
 
 class ErrorResponse(BaseModel):

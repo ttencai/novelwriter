@@ -193,6 +193,23 @@ class TestContinueEndpoint:
         cont = db.query(Continuation).filter(Continuation.novel_id == novel.id).one()
         assert "<world_knowledge>" in cont.prompt_used
 
+    def test_common_novel_writing_skills_are_not_injected_into_continuation_prompt(self, client, db, novel):
+        c, captured = client
+
+        resp = c.post(
+            f"/api/novels/{novel.id}/continue",
+            json={"num_versions": 1, "context_chapters": 2},
+        )
+        assert resp.status_code == 200
+
+        system_prompt = str(captured.get("system_prompt") or "")
+        prompt_used = str(captured.get("prompt") or "")
+        assert "<novel_writing_skills>" not in system_prompt
+        assert "<novel_writing_skills>" not in prompt_used
+
+        cont = db.query(Continuation).filter(Continuation.novel_id == novel.id).one()
+        assert "<novel_writing_skills>" not in cont.prompt_used
+
     def test_continue_context_is_isolated_by_novel_id(self, client, db, novel, world):
         c, captured = client
 
@@ -473,6 +490,7 @@ class TestContinueStreamEndpoint:
             "x-llm-base-url": "https://user.example.com/v1",
             "x-llm-api-key": "user-key",
             "x-llm-model": "user-model",
+            "x-llm-reasoning-effort": "high",
         }
         resp = c.post(
             f"/api/novels/{novel.id}/continue/stream",
@@ -502,10 +520,12 @@ class TestContinueStreamEndpoint:
         assert captured.get("stream_kwargs", {}).get("base_url") == "https://user.example.com/v1"
         assert captured.get("stream_kwargs", {}).get("api_key") == "user-key"
         assert captured.get("stream_kwargs", {}).get("model") == "user-model"
+        assert captured.get("stream_kwargs", {}).get("reasoning_effort") == "high"
 
         assert captured.get("kwargs", {}).get("base_url") == "https://user.example.com/v1"
         assert captured.get("kwargs", {}).get("api_key") == "user-key"
         assert captured.get("kwargs", {}).get("model") == "user-model"
+        assert captured.get("kwargs", {}).get("reasoning_effort") == "high"
 
     def test_stream_done_event_uses_split_warning_keys(self, client, novel, monkeypatch):
         c, _ = client
@@ -576,6 +596,46 @@ class TestContinueStreamEndpoint:
         events = [json.loads(ln) for ln in resp.text.splitlines() if ln.strip()]
         done1 = next(e for e in events if e["type"] == "variant_done" and e["variant"] == 1)
         assert done1["content"] == "续写内容"
+
+
+class TestContinuationEditingFlow:
+    def test_deai_review_rewrite_and_update(self, client, db, novel):
+        c, _ = client
+        continuation = Continuation(
+            novel_id=novel.id,
+            chapter_number=3,
+            content="待处理正文",
+            prompt_used="原续写提示",
+        )
+        db.add(continuation)
+        db.commit()
+        db.refresh(continuation)
+
+        deai = c.post(f"/api/novels/{novel.id}/continuations/{continuation.id}/deai")
+        assert deai.status_code == 200
+        assert deai.json()["polished_content"] == "续写内容"
+
+        updated = c.put(
+            f"/api/novels/{novel.id}/continuations/{continuation.id}",
+            json={"content": "人工修改后的正文"},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["content"] == "人工修改后的正文"
+
+        review = c.post(
+            f"/api/novels/{novel.id}/continuations/{continuation.id}/review",
+            json={"reviewer_model": None},
+        )
+        assert review.status_code == 200
+        assert review.json()["review_text"] == "续写内容"
+
+        rewritten = c.post(
+            f"/api/novels/{novel.id}/continuations/{continuation.id}/rewrite",
+            json={"review_text": review.json()["review_text"]},
+        )
+        assert rewritten.status_code == 200
+        assert rewritten.json()["id"] != continuation.id
+        assert rewritten.json()["content"] == "续写内容"
 
 
 class TestTemperaturePassthrough:

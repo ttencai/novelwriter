@@ -92,6 +92,7 @@ class Settings(BaseSettings):
     initial_quota: int = 5
     feedback_bonus_quota: int = 20
     feedback_suggestion_bonus_quota: int = 10
+    generation_quota_enabled: bool = True
     hosted_max_users: int = 0
 
     # Hosted/server-side AI safety fuses
@@ -121,6 +122,9 @@ class Settings(BaseSettings):
     assistant_chat_search_timeout_seconds: int = 10
     assistant_chat_search_max_results: int = 5
     assistant_chat_fetch_max_chars: int = 12000
+
+    # Skills storage. All users read the shared common skills directory.
+    skills_common_dir: str = "data/skills/common"
 
     # Event tracking (product analytics). Selfhost: off by default. Hosted: enable via env.
     enable_event_tracking: bool = False

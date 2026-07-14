@@ -12,6 +12,10 @@ data/*
 !data/demo/**
 !data/worldpacks/
 !data/worldpacks/**
+!data/skills/
+data/skills/*
+!data/skills/common/
+!data/skills/common/**
 .env
 .pytest_cache/
 .mypy_cache/

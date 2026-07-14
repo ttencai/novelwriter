@@ -1448,6 +1448,7 @@ def _extract_llm_kwargs(llm_config: dict[str, Any] | None) -> dict[str, Any]:
         kwargs["base_url"] = llm_config.get("base_url")
         kwargs["api_key"] = llm_config.get("api_key")
         kwargs["model"] = llm_config.get("model")
+        kwargs["reasoning_effort"] = llm_config.get("reasoning_effort")
         kwargs["billing_source_hint"] = llm_config.get("billing_source_hint", "selfhost")
     return kwargs
 
@@ -1490,6 +1491,7 @@ async def _call_copilot_llm_messages(
         kwargs["base_url"] = llm_config.get("base_url")
         kwargs["api_key"] = llm_config.get("api_key")
         kwargs["model"] = llm_config.get("model")
+        kwargs["reasoning_effort"] = llm_config.get("reasoning_effort")
         kwargs["billing_source_hint"] = llm_config.get("billing_source_hint", "selfhost")
 
     return await client.generate_from_messages(
@@ -1513,6 +1515,7 @@ async def _call_chat_completions_llm(
         kwargs["base_url"] = llm_config.get("base_url")
         kwargs["api_key"] = llm_config.get("api_key")
         kwargs["model"] = llm_config.get("model")
+        kwargs["reasoning_effort"] = llm_config.get("reasoning_effort")
         kwargs["billing_source_hint"] = llm_config.get("billing_source_hint", "selfhost")
 
     return await client.generate_chat_completions(

@@ -1,22 +1,32 @@
+export type ReasoningEffort = '' | 'low' | 'medium' | 'high'
+
 export interface LlmConfig {
   baseUrl: string
   apiKey: string
   model: string
+  reasoningEffort: ReasoningEffort
 }
 
 const EMPTY_CONFIG: LlmConfig = {
   baseUrl: '',
   apiKey: '',
   model: '',
+  reasoningEffort: '',
 }
 
 const STORAGE_KEY = 'novwr_llm_config_v1'
+
+
+function normalizeReasoningEffort(value: unknown): ReasoningEffort {
+  return value === 'low' || value === 'medium' || value === 'high' ? value : ''
+}
 
 function normalize(value: Partial<LlmConfig>): LlmConfig {
   return {
     baseUrl: (value.baseUrl ?? '').trim(),
     apiKey: (value.apiKey ?? '').trim(),
     model: (value.model ?? '').trim(),
+    reasoningEffort: normalizeReasoningEffort(value.reasoningEffort),
   }
 }
 
@@ -65,11 +75,12 @@ export function setLlmConfig(value: Partial<LlmConfig>): LlmConfig {
 export function initializeLlmConfig(value: Partial<LlmConfig>): LlmConfig {
   const defaults = normalize({ ...EMPTY_CONFIG, ...value })
   const stored = readStoredConfig()
-  if (stored.baseUrl || stored.apiKey || stored.model) {
+  if (stored.baseUrl || stored.apiKey || stored.model || stored.reasoningEffort) {
     currentConfig = normalize({
       baseUrl: stored.baseUrl || defaults.baseUrl,
       apiKey: stored.apiKey || defaults.apiKey,
       model: stored.model || defaults.model,
+      reasoningEffort: stored.reasoningEffort || defaults.reasoningEffort,
     })
     return getLlmConfig()
   }
@@ -78,6 +89,7 @@ export function initializeLlmConfig(value: Partial<LlmConfig>): LlmConfig {
     baseUrl: currentConfig.baseUrl || defaults.baseUrl,
     apiKey: currentConfig.apiKey || defaults.apiKey,
     model: currentConfig.model || defaults.model,
+    reasoningEffort: currentConfig.reasoningEffort || defaults.reasoningEffort,
   })
   return getLlmConfig()
 }

@@ -8,12 +8,13 @@ describe('llmConfigStore', () => {
   })
 
   it('stores config in local storage so refreshes can restore it', () => {
-    setLlmConfig({ baseUrl: ' http://example.com/v1 ', apiKey: ' sk-test ', model: ' m ' })
+    setLlmConfig({ baseUrl: ' http://example.com/v1 ', apiKey: ' sk-test ', model: ' m ', reasoningEffort: 'medium' })
 
     expect(getLlmConfig()).toEqual({
       baseUrl: 'http://example.com/v1',
       apiKey: 'sk-test',
       model: 'm',
+      reasoningEffort: 'medium',
     })
     expect(localStorage.getItem('novwr_llm_config_v1')).toContain('http://example.com/v1')
   })
@@ -22,7 +23,7 @@ describe('llmConfigStore', () => {
     setLlmConfig({ baseUrl: 'http://example.com/v1', apiKey: 'sk-test', model: 'm' })
     clearLlmConfig()
 
-    expect(getLlmConfig()).toEqual({ baseUrl: '', apiKey: '', model: '' })
+    expect(getLlmConfig()).toEqual({ baseUrl: '', apiKey: '', model: '', reasoningEffort: '' })
     expect(localStorage.getItem('novwr_llm_config_v1')).toBeNull()
   })
 
@@ -39,6 +40,7 @@ describe('llmConfigStore', () => {
       baseUrl: 'https://api.openai.com/v1',
       apiKey: 'sk-env',
       model: 'deepseek-chat',
+      reasoningEffort: '',
     })
   })
 
@@ -53,6 +55,7 @@ describe('llmConfigStore', () => {
       baseUrl: 'https://api.openai.com/v1',
       apiKey: 'sk-env',
       model: 'gpt-5.4',
+      reasoningEffort: '',
     })
   })
 
@@ -61,6 +64,7 @@ describe('llmConfigStore', () => {
       baseUrl: 'https://saved.example/v1',
       apiKey: 'sk-saved',
       model: 'gpt-saved',
+      reasoningEffort: '',
     })
 
     expect(
@@ -73,6 +77,20 @@ describe('llmConfigStore', () => {
       baseUrl: 'https://saved.example/v1',
       apiKey: 'sk-saved',
       model: 'gpt-saved',
+      reasoningEffort: '',
     })
+  })
+
+  it('persists reasoning effort when selected', () => {
+    setLlmConfig({ reasoningEffort: 'high' })
+
+    expect(getLlmConfig().reasoningEffort).toBe('high')
+    expect(localStorage.getItem('novwr_llm_config_v1')).toContain('high')
+  })
+
+  it('ignores unsupported reasoning effort values', () => {
+    setLlmConfig({ reasoningEffort: 'invalid' as never })
+
+    expect(getLlmConfig().reasoningEffort).toBe('')
   })
 })

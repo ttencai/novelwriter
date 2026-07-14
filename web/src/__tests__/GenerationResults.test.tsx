@@ -129,7 +129,7 @@ describe('GenerationResults compatibility', () => {
     expect(screen.getByText('正在加载续写结果...')).toBeInTheDocument()
 
     await waitFor(() => {
-      expect(screen.getByTestId('plain-text-content')).toHaveTextContent('已持久化的续写结果')
+      expect(screen.getByTestId('continuation-result-editor')).toHaveValue('已持久化的续写结果')
     })
 
     expect(mockGetContinuations).toHaveBeenCalledWith(7, [101])

@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import '@/lib/uiMessagePacks/novel'
-import { Check, RefreshCw, Upload, Info, ChevronDown, ChevronRight, Loader2, Settings, MessageSquarePlus } from 'lucide-react'
+import { Check, RefreshCw, Upload, Info, ChevronDown, ChevronRight, Loader2, Settings, MessageSquarePlus, Sparkles, X, FileSearch } from 'lucide-react'
 import { NwButton } from '@/components/ui/nw-button'
 import { PlainTextContent, type TextAnnotation } from '@/components/ui/plain-text-content'
 import { FeedbackForm, type FeedbackAnswers } from '@/components/feedback/FeedbackForm'
@@ -23,7 +23,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { downloadTextFile } from '@/lib/downloadTextFile'
 import { cn } from '@/lib/utils'
-import type { ContinueDebugSummary, ContinueRequest, ContinueResponse, Continuation, PostcheckWarning, ProseWarning } from '@/types/api'
+import type { ContinueDebugSummary, ContinueRequest, ContinueResponse, Continuation, ContinuationPolishResponse, ContinuationReviewResponse, PostcheckWarning, ProseWarning } from '@/types/api'
 
 interface VariantState {
   content: string
@@ -111,6 +111,20 @@ export function ContinuationResultsStage({
 
   const [reloadedWarnings, setReloadedWarnings] = useState<PostcheckWarning[]>([])
   const [whitelist, setWhitelist] = useState<string[]>(() => getWhitelist(novelId))
+  const [continuationContentOverrides, setContinuationContentOverrides] = useState<Record<number, string>>({})
+  const [deAiOpen, setDeAiOpen] = useState(false)
+  const [deAiLoading, setDeAiLoading] = useState(false)
+  const [deAiAdopting, setDeAiAdopting] = useState(false)
+  const [deAiError, setDeAiError] = useState<string | null>(null)
+  const [deAiPreview, setDeAiPreview] = useState<ContinuationPolishResponse | null>(null)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const [reviewRewriting, setReviewRewriting] = useState(false)
+  const [reviewError, setReviewError] = useState<string | null>(null)
+  const [reviewPreview, setReviewPreview] = useState<ContinuationReviewResponse | null>(null)
+  const [reviewerModel, setReviewerModel] = useState('')
+  const [reviewModelOptions, setReviewModelOptions] = useState<string[]>([])
+  const [reviewModelsLoading, setReviewModelsLoading] = useState(false)
   const createChapter = useCreateChapter(novelId)
 
   const handleDismissTerm = useCallback((term: string) => {
@@ -315,7 +329,11 @@ export function ContinuationResultsStage({
 
   const currentVariant = isStreamMode ? variants[activeTab] : undefined
   const currentLegacyVersion = isLegacyMode ? nonStreamVersions[activeTab] : undefined
-  const currentContent = currentVariant?.content ?? currentLegacyVersion?.content ?? ''
+  const currentContinuationId = currentVariant?.continuationId ?? currentLegacyVersion?.id ?? null
+  const rawCurrentContent = currentVariant?.content ?? currentLegacyVersion?.content ?? ''
+  const currentContent = currentContinuationId != null
+    ? continuationContentOverrides[currentContinuationId] ?? rawCurrentContent
+    : rawCurrentContent
   const allDone = isLegacyMode || isDone
   const tabCount = isStreamMode ? variants.length : nonStreamVersions.length
 
@@ -331,6 +349,25 @@ export function ContinuationResultsStage({
   useEffect(() => {
     onDebugChange(debug)
   }, [debug, onDebugChange])
+
+  const canEditCurrentContent = allDone && currentContinuationId != null
+
+  const handleCurrentContentChange = useCallback((value: string) => {
+    if (currentContinuationId == null) return
+    setContinuationContentOverrides((prev) => ({ ...prev, [currentContinuationId]: value }))
+  }, [currentContinuationId])
+
+  const persistCurrentContent = useCallback(async () => {
+    if (!canEditCurrentContent || currentContinuationId == null || !currentContent || currentContent === rawCurrentContent) return
+    const updated = await api.updateContinuation(novelId, currentContinuationId, currentContent)
+    setContinuationContentOverrides((prev) => ({ ...prev, [updated.id]: updated.content }))
+    setVariants((prev) => prev.map((variant) => (
+      variant.continuationId === updated.id ? { ...variant, content: updated.content } : variant
+    )))
+    setPersistedVersions((prev) => prev?.map((item) => (
+      item.id === updated.id ? { ...item, content: updated.content } : item
+    )) ?? prev)
+  }, [canEditCurrentContent, currentContent, currentContinuationId, novelId, rawCurrentContent])
 
   const handleAdopt = useCallback(() => {
     if (!currentContent) return
@@ -369,11 +406,162 @@ export function ContinuationResultsStage({
     whitelist,
   ])
 
+  const handleDeAi = useCallback(async () => {
+    if (!currentContinuationId || !currentContent || !allDone) return
+    setDeAiOpen(true)
+    setDeAiLoading(true)
+    setDeAiError(null)
+    setDeAiPreview(null)
+    try {
+      await persistCurrentContent()
+      const preview = await api.deAiContinuation(novelId, currentContinuationId)
+      setDeAiPreview(preview)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const llmMessage = getLlmApiErrorMessage(err, locale)
+        setDeAiError(llmMessage ?? t('continuation.results.deAiFailed'))
+      } else {
+        setDeAiError(err instanceof Error ? err.message : t('continuation.results.deAiFailed'))
+      }
+    } finally {
+      setDeAiLoading(false)
+    }
+  }, [allDone, currentContent, currentContinuationId, locale, novelId, persistCurrentContent, t])
+
+  const handleAcceptDeAi = useCallback(async () => {
+    if (!deAiPreview) return
+    setDeAiAdopting(true)
+    setDeAiError(null)
+    try {
+      const updated = await api.updateContinuation(novelId, deAiPreview.continuation_id, deAiPreview.polished_content)
+      setContinuationContentOverrides((prev) => ({ ...prev, [updated.id]: updated.content }))
+      setVariants((prev) => prev.map((variant) => (
+        variant.continuationId === updated.id ? { ...variant, content: updated.content } : variant
+      )))
+      setPersistedVersions((prev) => prev?.map((item) => (
+        item.id === updated.id ? { ...item, content: updated.content } : item
+      )) ?? prev)
+      setDeAiOpen(false)
+      setDeAiPreview(null)
+    } catch (err) {
+      setDeAiError(err instanceof Error ? err.message : t('continuation.results.deAiAdoptFailed'))
+    } finally {
+      setDeAiAdopting(false)
+    }
+  }, [deAiPreview, novelId, t])
+
+  const handleLoadReviewModels = useCallback(async () => {
+    setReviewModelsLoading(true)
+    try {
+      const res = await api.listLlmModels()
+      setReviewModelOptions(res.models.map((item) => item.id).filter(Boolean))
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : t('continuation.results.reviewModelsFailed'))
+    } finally {
+      setReviewModelsLoading(false)
+    }
+  }, [t])
+
+  const handleOpenReview = useCallback(() => {
+    setReviewOpen(true)
+    setReviewError(null)
+    if (reviewModelOptions.length === 0 && !reviewModelsLoading) {
+      void handleLoadReviewModels()
+    }
+  }, [handleLoadReviewModels, reviewModelOptions.length, reviewModelsLoading])
+
+  const handleSubmitReview = useCallback(async () => {
+    if (currentContinuationId == null || !currentContent.trim()) {
+      setReviewError(t('continuation.results.reviewNotReady'))
+      return
+    }
+    setReviewLoading(true)
+    setReviewError(null)
+    setReviewPreview(null)
+    try {
+      await persistCurrentContent()
+      const preview = await api.reviewContinuation(novelId, currentContinuationId, reviewerModel.trim())
+      setReviewPreview(preview)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const llmMessage = getLlmApiErrorMessage(err, locale)
+        setReviewError(llmMessage ?? t('continuation.results.reviewFailed'))
+      } else {
+        setReviewError(err instanceof Error ? err.message : t('continuation.results.reviewFailed'))
+      }
+    } finally {
+      setReviewLoading(false)
+    }
+  }, [currentContent, currentContinuationId, locale, novelId, persistCurrentContent, reviewerModel, t])
+
+  const handleRewriteFromReview = useCallback(async () => {
+    if (!reviewPreview || currentContinuationId == null) return
+    setReviewRewriting(true)
+    setReviewError(null)
+    try {
+      const updated = await api.rewriteContinuationWithReview(
+        novelId,
+        currentContinuationId,
+        reviewPreview.review_text,
+        reviewPreview.rewrite_instruction,
+      )
+      setContinuationContentOverrides((prev) => ({ ...prev, [updated.id]: updated.content }))
+      setVariants((prev) => prev.map((variant, index) => (
+        index === activeTab ? { ...variant, continuationId: updated.id, content: updated.content, isStreaming: false, error: null } : variant
+      )))
+      setPersistedVersions((prev) => {
+        const base = prev ?? nonStreamVersions
+        if (base.length === 0) return prev
+        return base.map((item, index) => (index === activeTab ? updated : item))
+      })
+
+      const nextSearchParams = new URLSearchParams(location.search)
+      const mappingRaw = nextSearchParams.get('continuations')
+      if (mappingRaw) {
+        const nextMapping = mappingRaw
+          .split(',')
+          .map((pair) => pair.trim())
+          .filter(Boolean)
+          .map((pair) => {
+            const [variantRaw, idRaw] = pair.split(':')
+            const variant = Number.parseInt((variantRaw ?? '').trim(), 10)
+            const id = Number.parseInt((idRaw ?? '').trim(), 10)
+            if (variant === activeTab || id === currentContinuationId) return `${Number.isFinite(variant) ? variant : activeTab}:${updated.id}`
+            return pair
+          })
+          .join(',')
+        if (nextMapping) {
+          nextSearchParams.set('continuations', nextMapping)
+          navigate(
+            { pathname: location.pathname, search: nextSearchParams.toString() },
+            { replace: true, state: null },
+          )
+        }
+      }
+
+      setReviewOpen(false)
+      setReviewPreview(null)
+    } catch (err) {
+      if (err instanceof ApiError) {
+        const llmMessage = getLlmApiErrorMessage(err, locale)
+        setReviewError(llmMessage ?? t('continuation.results.rewriteFailed'))
+      } else {
+        setReviewError(err instanceof Error ? err.message : t('continuation.results.rewriteFailed'))
+      }
+    } finally {
+      setReviewRewriting(false)
+    }
+  }, [activeTab, currentContinuationId, locale, location.pathname, location.search, navigate, nonStreamVersions, novelId, reviewPreview, t])
+
   const handleExportAll = () => {
     const versions = isStreamMode ? variants : nonStreamVersions
     if (versions.length === 0) return
     const content = versions
-      .map((variant, index) => `${t('continuation.results.exportVersionHeader', { n: index + 1 })}\n\n${variant.content}\n`)
+      .map((variant, index) => {
+        const id = isStreamMode ? (variant as VariantState).continuationId : (variant as Continuation).id
+        const versionContent = id != null ? continuationContentOverrides[id] ?? variant.content : variant.content
+        return `${t('continuation.results.exportVersionHeader', { n: index + 1 })}\n\n${versionContent}\n`
+      })
       .join('\n\n')
     downloadTextFile(`continuation_versions_${new Date().toISOString().slice(0, 10)}.txt`, content)
   }
@@ -390,6 +578,31 @@ export function ContinuationResultsStage({
     } finally {
       setFeedbackSubmitting(false)
     }
+  }
+
+  const renderCurrentContent = (annotations?: TextAnnotation[]) => {
+    if (canEditCurrentContent) {
+      return (
+        <textarea
+          data-testid="continuation-result-editor"
+          value={currentContent}
+          onChange={(event) => handleCurrentContentChange(event.target.value)}
+          onBlur={() => { void persistCurrentContent().catch(() => undefined) }}
+          aria-label={t('continuation.results.badge')}
+          placeholder={t('continuation.results.emptyContent')}
+          className="nw-scrollbar-thin flex-1 min-h-0 w-full resize-none overflow-y-auto rounded-xl border border-[var(--nw-glass-border)] bg-[hsl(var(--background)/0.35)] px-5 py-4 text-[15px] leading-8 text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-[hsl(var(--accent)/0.45)] focus:bg-[hsl(var(--background)/0.5)] focus:ring-2 focus:ring-[hsl(var(--accent)/0.16)]"
+        />
+      )
+    }
+
+    return (
+      <PlainTextContent
+        content={currentContent}
+        className="flex-1 min-h-0 overflow-y-auto nw-scrollbar-thin"
+        emptyLabel={t('continuation.results.emptyContent')}
+        annotations={annotations}
+      />
+    )
   }
 
   if (!isStreamMode && !isLegacyMode) {
@@ -504,7 +717,7 @@ export function ContinuationResultsStage({
           ) : null}
         </div>
 
-        {showFeedbackForm ? (
+      {showFeedbackForm ? (
           <FeedbackForm
             onSubmit={handleFeedbackSubmit}
             onCancel={() => setShowFeedbackForm(false)}
@@ -549,6 +762,28 @@ export function ContinuationResultsStage({
               >
                 <Check size={16} />
                 {t('continuation.results.adopt')}
+              </NwButton>
+
+              <NwButton
+                data-testid="results-deai-button"
+                onClick={handleDeAi}
+                disabled={!currentContinuationId || !currentContent || !allDone || deAiLoading}
+                variant="accentOutline"
+                className="rounded-[10px] px-4 py-2 text-sm font-medium"
+              >
+                {deAiLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                {t('continuation.results.deAi')}
+              </NwButton>
+
+              <NwButton
+                data-testid="results-review-button"
+                onClick={handleOpenReview}
+                disabled={!currentContinuationId || !currentContent || !allDone || reviewLoading}
+                variant="accentOutline"
+                className="rounded-[10px] px-4 py-2 text-sm font-medium"
+              >
+                {reviewLoading ? <Loader2 size={14} className="animate-spin" /> : <FileSearch size={14} />}
+                {t('continuation.results.review')}
               </NwButton>
 
               <NwButton
@@ -624,13 +859,8 @@ export function ContinuationResultsStage({
                 </NwButton>
               </div>
             </div>
-          ) : currentVariant.content ? (
-            <PlainTextContent
-              content={currentVariant.content}
-              className="flex-1 min-h-0 overflow-y-auto nw-scrollbar-thin"
-              emptyLabel={t('continuation.results.emptyContent')}
-              annotations={driftAnnotations}
-            />
+          ) : currentContent || canEditCurrentContent ? (
+            renderCurrentContent(driftAnnotations)
           ) : currentVariant.isStreaming || !currentVariant.continuationId ? (
             <div className="flex-1 min-h-0 flex items-center justify-center">
               <Loader2 size={24} className="animate-spin text-muted-foreground" />
@@ -643,12 +873,7 @@ export function ContinuationResultsStage({
             />
           )
         ) : (
-          <PlainTextContent
-            content={currentLegacyVersion?.content}
-            className="flex-1 min-h-0 overflow-y-auto nw-scrollbar-thin"
-            emptyLabel={t('continuation.results.emptyContent')}
-            annotations={driftAnnotations}
-          />
+          renderCurrentContent(driftAnnotations)
         )}
 
         {summary ? (
@@ -688,6 +913,200 @@ export function ContinuationResultsStage({
           )
         })()}
       </div>
+
+      {deAiOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--nw-backdrop)] p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+          <div className="flex h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-[var(--nw-glass-border-hover)] bg-[hsl(var(--nw-modal-bg))] shadow-[0_24px_80px_var(--nw-backdrop)]">
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--nw-glass-border)] px-5 py-4">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-foreground">{t('continuation.results.deAiTitle')}</div>
+                <div className="mt-1 text-xs text-muted-foreground">{t('continuation.results.deAiSubtitle')}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeAiOpen(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[var(--nw-glass-bg-hover)] hover:text-foreground"
+                aria-label={t('dialog.cancel')}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-hidden p-5">
+              {deAiLoading ? (
+                <div className="flex min-h-[360px] items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 size={18} className="animate-spin" />
+                  {t('continuation.results.deAiProcessing')}
+                </div>
+              ) : deAiPreview ? (
+                <div className="grid h-full min-h-0 gap-4 lg:grid-cols-2">
+                  <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-[var(--nw-glass-border)] bg-background/20">
+                    <div className="border-b border-[var(--nw-glass-border)] px-4 py-3 text-xs font-semibold text-muted-foreground">
+                      {t('continuation.results.deAiOriginal')}
+                    </div>
+                    <div className="nw-scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4 text-sm leading-8 text-foreground/85 whitespace-pre-wrap select-text">
+                      {deAiPreview.original_content}
+                    </div>
+                  </div>
+                  <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-[hsl(var(--accent)/0.35)] bg-[hsl(var(--accent)/0.06)]">
+                    <div className="border-b border-[hsl(var(--accent)/0.25)] px-4 py-3 text-xs font-semibold text-accent">
+                      {t('continuation.results.deAiPolished')}
+                    </div>
+                    <div className="nw-scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4 text-sm leading-8 text-foreground whitespace-pre-wrap select-text">
+                      {deAiPreview.polished_content}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {deAiError ? (
+                <div className="mt-4 rounded-lg border border-[hsl(var(--color-warning)/0.35)] bg-[hsl(var(--color-warning)/0.10)] px-3 py-2 text-xs text-[hsl(var(--color-warning))]">
+                  {deAiError}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-[var(--nw-glass-border)] px-5 py-4">
+              <NwButton
+                onClick={() => setDeAiOpen(false)}
+                variant="glass"
+                className="rounded-[10px] px-4 py-2 text-sm font-medium"
+              >
+                {t('dialog.cancel')}
+              </NwButton>
+              <NwButton
+                onClick={handleAcceptDeAi}
+                disabled={!deAiPreview || deAiLoading || deAiAdopting}
+                variant="accent"
+                className="rounded-[10px] px-5 py-2 text-sm font-semibold"
+              >
+                {deAiAdopting ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                {t('continuation.results.adopt')}
+              </NwButton>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+        {reviewOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--nw-backdrop)] p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+          <div className="flex h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-[var(--nw-glass-border-hover)] bg-[hsl(var(--nw-modal-bg))] shadow-[0_24px_80px_var(--nw-backdrop)]">
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--nw-glass-border)] px-5 py-4">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-foreground">{t('continuation.results.reviewTitle')}</div>
+                <div className="mt-1 text-xs text-muted-foreground">{t('continuation.results.reviewSubtitle')}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReviewOpen(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[var(--nw-glass-bg-hover)] hover:text-foreground"
+                aria-label={t('dialog.cancel')}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="flex shrink-0 flex-col gap-3 border-b border-[var(--nw-glass-border)] px-5 py-4 md:flex-row md:items-end">
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="continuation-review-model">
+                  {t('continuation.results.reviewModel')}
+                </label>
+                <input
+                  id="continuation-review-model"
+                  list="continuation-review-model-options"
+                  value={reviewerModel}
+                  onChange={(event) => setReviewerModel(event.target.value)}
+                  placeholder={t('continuation.results.reviewModelAuto')}
+                  className="h-10 w-full rounded-[10px] border border-[var(--nw-glass-border)] bg-background/25 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-[hsl(var(--accent)/0.45)] focus:ring-2 focus:ring-[hsl(var(--accent)/0.16)]"
+                />
+                <datalist id="continuation-review-model-options">
+                  {reviewModelOptions.map((model) => (
+                    <option key={model} value={model} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="flex gap-2">
+                <NwButton
+                  onClick={handleLoadReviewModels}
+                  disabled={reviewModelsLoading}
+                  variant="glass"
+                  className="rounded-[10px] px-4 py-2 text-sm font-medium"
+                >
+                  {reviewModelsLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {t('continuation.results.fetchModels')}
+                </NwButton>
+                <NwButton
+                  onClick={handleSubmitReview}
+                  disabled={reviewLoading}
+                  variant="accent"
+                  className="rounded-[10px] px-4 py-2 text-sm font-semibold"
+                >
+                  {reviewLoading ? <Loader2 size={14} className="animate-spin" /> : <FileSearch size={14} />}
+                  {t('continuation.results.startReview')}
+                </NwButton>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-hidden p-5">
+              {reviewLoading ? (
+                <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 size={18} className="animate-spin" />
+                  {t('continuation.results.reviewProcessing')}
+                </div>
+              ) : reviewPreview ? (
+                <div className="grid h-full min-h-0 gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+                  <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-[var(--nw-glass-border)] bg-background/20">
+                    <div className="border-b border-[var(--nw-glass-border)] px-4 py-3 text-xs font-semibold text-muted-foreground">
+                      {t('continuation.results.reviewOriginal')}
+                    </div>
+                    <div className="nw-scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4 text-sm leading-8 text-foreground/85 whitespace-pre-wrap select-text">
+                      {reviewPreview.original_content}
+                    </div>
+                  </div>
+                  <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-[hsl(var(--accent)/0.35)] bg-[hsl(var(--accent)/0.06)]">
+                    <div className="border-b border-[hsl(var(--accent)/0.25)] px-4 py-3 text-xs font-semibold text-accent">
+                      {t('continuation.results.reviewReport')}
+                    </div>
+                    <div className="nw-scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4 text-sm leading-8 text-foreground whitespace-pre-wrap select-text">
+                      {reviewPreview.review_text}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  {t('continuation.results.reviewEmpty')}
+                </div>
+              )}
+
+              {reviewError ? (
+                <div className="mt-4 rounded-lg border border-[hsl(var(--color-warning)/0.35)] bg-[hsl(var(--color-warning)/0.10)] px-3 py-2 text-xs text-[hsl(var(--color-warning))]">
+                  {reviewError}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-[var(--nw-glass-border)] px-5 py-4">
+              <NwButton
+                onClick={() => setReviewOpen(false)}
+                variant="glass"
+                className="rounded-[10px] px-4 py-2 text-sm font-medium"
+              >
+                {t('dialog.cancel')}
+              </NwButton>
+              <NwButton
+                onClick={handleRewriteFromReview}
+                disabled={!reviewPreview || reviewLoading || reviewRewriting}
+                variant="accent"
+                className="rounded-[10px] px-5 py-2 text-sm font-semibold"
+              >
+                {reviewRewriting ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                {t('continuation.results.rewriteWithReview')}
+              </NwButton>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
 
       {showFeedbackForm ? (
         <FeedbackForm

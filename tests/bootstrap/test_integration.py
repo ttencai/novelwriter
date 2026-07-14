@@ -96,6 +96,7 @@ def test_bootstrap_forwards_byok_headers_to_background_job(client, db):
         "x-llm-base-url": "https://example.com/v1",
         "x-llm-api-key": "test-key",
         "x-llm-model": "test-model",
+        "x-llm-reasoning-effort": "medium",
     }
     response = client.post(
         f"/api/novels/{novel.id}/world/bootstrap",
@@ -109,6 +110,7 @@ def test_bootstrap_forwards_byok_headers_to_background_job(client, db):
         "base_url": "https://example.com/v1",
         "api_key": "test-key",
         "model": "test-model",
+        "reasoning_effort": "medium",
         "billing_source_hint": "selfhost",
     }
 

@@ -15,6 +15,7 @@ from app.config import get_settings
 LLM_BASE_URL_HEADER = "x-llm-base-url"
 LLM_API_KEY_HEADER = "x-llm-api-key"
 LLM_MODEL_HEADER = "x-llm-model"
+LLM_REASONING_EFFORT_HEADER = "x-llm-reasoning-effort"
 
 LLM_CONFIG_INCOMPLETE_CODE = "llm_config_incomplete"
 LLM_CONFIG_INCOMPLETE_MESSAGE = (
@@ -22,11 +23,17 @@ LLM_CONFIG_INCOMPLETE_MESSAGE = (
 )
 
 
+def normalize_reasoning_effort(value: str | None) -> str | None:
+    normalized = (value or "").strip().lower()
+    return normalized if normalized in {"low", "medium", "high"} else None
+
+
 @dataclass(frozen=True)
 class RequestLLMOverride:
     base_url: str | None
     api_key: str | None
     model: str | None
+    reasoning_effort: str | None = None
 
     def has_any_value(self) -> bool:
         return bool(self.base_url or self.api_key or self.model)
@@ -47,6 +54,7 @@ def read_llm_override(request: Request) -> RequestLLMOverride:
         base_url=request.headers.get(LLM_BASE_URL_HEADER),
         api_key=request.headers.get(LLM_API_KEY_HEADER),
         model=request.headers.get(LLM_MODEL_HEADER),
+        reasoning_effort=normalize_reasoning_effort(request.headers.get(LLM_REASONING_EFFORT_HEADER)),
     )
 
 
@@ -61,6 +69,7 @@ def get_llm_config(request: Request) -> dict[str, Any] | None:
                 "base_url": settings.hosted_llm_base_url,
                 "api_key": settings.hosted_llm_api_key,
                 "model": settings.hosted_llm_model,
+                "reasoning_effort": override.reasoning_effort,
                 "billing_source_hint": "hosted",
             }
         return None
@@ -83,6 +92,7 @@ def get_llm_config(request: Request) -> dict[str, Any] | None:
         "base_url": override.base_url,
         "api_key": override.api_key,
         "model": override.model,
+        "reasoning_effort": override.reasoning_effort,
         "billing_source_hint": billing_source_hint,
     }
 

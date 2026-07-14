@@ -297,17 +297,16 @@ async def _collect_response_stream_text(stream: Any) -> tuple[str, Any, int, int
     return text, response, prompt_tokens, completion_tokens, finish_reason
 
 
+
 def _reasoning_kwargs(reasoning_effort: str | None) -> dict[str, Any]:
     if reasoning_effort in {"low", "medium", "high"}:
         return {"reasoning": {"effort": reasoning_effort}}
     return {}
 
-
 def _chat_reasoning_kwargs(reasoning_effort: str | None) -> dict[str, Any]:
     if reasoning_effort in {"low", "medium", "high"}:
         return {"reasoning_effort": reasoning_effort}
     return {}
-
 
 class AIClient:
     @property
@@ -340,6 +339,7 @@ class AIClient:
         system_prompt: str,
         max_tokens: int,
         temperature: float,
+        reasoning_effort: str | None = None,
     ):
         return await client.responses.create(
             model=model,
@@ -347,6 +347,7 @@ class AIClient:
             input=prompt,
             max_output_tokens=max_tokens,
             temperature=temperature,
+            **_reasoning_kwargs(reasoning_effort),
         )
 
     async def _responses_generate_stream(
@@ -358,6 +359,7 @@ class AIClient:
         system_prompt: str,
         max_tokens: int,
         temperature: float,
+        reasoning_effort: str | None = None,
     ):
         return await client.responses.create(
             model=model,
@@ -366,6 +368,7 @@ class AIClient:
             max_output_tokens=max_tokens,
             temperature=temperature,
             stream=True,
+            **_reasoning_kwargs(reasoning_effort),
         )
 
     async def generate(
@@ -378,6 +381,7 @@ class AIClient:
         base_url: str | None = None,
         api_key: str | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
         billing_source_hint: str | None = None,
         user_id: int | None = None,
     ) -> str:
@@ -397,6 +401,7 @@ class AIClient:
                 system_prompt=system_prompt,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                reasoning_effort=reasoning_effort,
             )
             text, _response, prompt_tokens, completion_tokens, finish_reason = await _collect_response_stream_text(stream)
             if text:
@@ -443,6 +448,7 @@ class AIClient:
                 system_prompt=system_prompt,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                reasoning_effort=reasoning_effort,
             )
             raw = (_extract_response_text(response) or "").strip()
             if raw:
@@ -491,6 +497,7 @@ class AIClient:
             ],
             max_tokens=max_tokens,
             temperature=temperature,
+            **_chat_reasoning_kwargs(reasoning_effort),
         )
         if response.usage:
             _record_usage(
@@ -520,6 +527,7 @@ class AIClient:
         base_url: str | None = None,
         api_key: str | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
         billing_source_hint: str | None = None,
         user_id: int | None = None,
     ) -> str:
@@ -537,6 +545,7 @@ class AIClient:
                 input=messages,
                 max_output_tokens=max_tokens,
                 temperature=temperature,
+                **_reasoning_kwargs(reasoning_effort),
             )
             prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
             if prompt_tokens or completion_tokens:
@@ -582,6 +591,7 @@ class AIClient:
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
+            **_chat_reasoning_kwargs(reasoning_effort),
         )
         if response.usage:
             _record_usage(
@@ -612,6 +622,7 @@ class AIClient:
         base_url: str | None = None,
         api_key: str | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
         billing_source_hint: str | None = None,
         user_id: int | None = None,
     ) -> str:
@@ -628,6 +639,7 @@ class AIClient:
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
+            **_chat_reasoning_kwargs(reasoning_effort),
         )
         if response.usage:
             _record_usage(
@@ -659,6 +671,7 @@ class AIClient:
         base_url: str | None = None,
         api_key: str | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
         billing_source_hint: str | None = None,
         user_id: int | None = None,
     ):
@@ -678,6 +691,7 @@ class AIClient:
                 system_prompt=system_prompt,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                reasoning_effort=reasoning_effort,
             )
             prompt_tokens = 0
             completion_tokens = 0
@@ -721,6 +735,7 @@ class AIClient:
             ],
             "max_tokens": max_tokens,
             "temperature": temperature,
+            **_chat_reasoning_kwargs(reasoning_effort),
             "stream": True,
         }
         try:
@@ -777,6 +792,7 @@ class AIClient:
         base_url: str | None = None,
         api_key: str | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
         billing_source_hint: str | None = None,
         user_id: int | None = None,
         tool_choice: str | None = None,
@@ -797,6 +813,7 @@ class AIClient:
                 tool_choice=tool_choice or "auto",
                 max_output_tokens=max_tokens,
                 temperature=temperature,
+                **_reasoning_kwargs(reasoning_effort),
             )
             prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
             if prompt_tokens or completion_tokens:
@@ -826,6 +843,7 @@ class AIClient:
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
+            **_chat_reasoning_kwargs(reasoning_effort),
         }
         if tools:
             request_kwargs["tools"] = tools
@@ -884,6 +902,7 @@ class AIClient:
         base_url: str | None = None,
         api_key: str | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
         billing_source_hint: str | None = None,
         user_id: int | None = None,
     ) -> T:
@@ -915,6 +934,7 @@ class AIClient:
                     system_prompt=structured_system,
                     max_tokens=max_tokens,
                     temperature=temperature,
+                    reasoning_effort=reasoning_effort,
                 )
                 raw, response, prompt_tokens, completion_tokens, finish_reason = await _collect_response_stream_text(stream)
                 raw = raw.strip()
@@ -985,6 +1005,7 @@ class AIClient:
                     input=prompt,
                     max_output_tokens=max_tokens,
                     temperature=temperature,
+                    **_reasoning_kwargs(reasoning_effort),
                 )
                 saw_response = True
                 prompt_tokens, completion_tokens = _extract_usage_pair(getattr(response, "usage", None))
@@ -1055,6 +1076,7 @@ class AIClient:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     response_format={"type": "json_object"},
+                    **_chat_reasoning_kwargs(reasoning_effort),
                 )
             except Exception as e:
                 last_request_error = e

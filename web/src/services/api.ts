@@ -7,6 +7,8 @@ import type {
   ContinueRequest,
   ContinueResponse,
   Continuation,
+  ContinuationPolishResponse,
+  ContinuationReviewResponse,
   StreamEvent,
   QuotaResponse,
   WorldEntity,
@@ -29,6 +31,7 @@ import type {
   BootstrapTriggerRequest,
   WorldpackImportResponse,
   WorldpackV1,
+  SkillsResponse,
 } from '@/types/api'
 import {
   ApiError,
@@ -81,6 +84,8 @@ export const api = {
   },
 
   getQuota: () => request<QuotaResponse>('/api/auth/quota'),
+
+  listSkills: () => request<SkillsResponse>('/api/skills'),
 
   logout: async () => {
     const res = await fetch(`${BASE_URL}/api/auth/logout`, {
@@ -155,6 +160,33 @@ export const api = {
       `/api/novels/${novelId}/continuations?ids=${encodeURIComponent(ids.join(','))}`,
     )
   },
+
+  deAiContinuation: (novelId: number, continuationId: number) =>
+    request<ContinuationPolishResponse>(`/api/novels/${novelId}/continuations/${continuationId}/deai`, {
+      method: 'POST',
+      headers: llmHeaders(),
+      body: JSON.stringify({}),
+    }),
+
+  updateContinuation: (novelId: number, continuationId: number, content: string) =>
+    request<Continuation>(`/api/novels/${novelId}/continuations/${continuationId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    }),
+
+  reviewContinuation: (novelId: number, continuationId: number, reviewerModel?: string) =>
+    request<ContinuationReviewResponse>(`/api/novels/${novelId}/continuations/${continuationId}/review`, {
+      method: 'POST',
+      headers: llmHeaders(),
+      body: JSON.stringify({ reviewer_model: reviewerModel || null }),
+    }),
+
+  rewriteContinuationWithReview: (novelId: number, continuationId: number, reviewText: string, rewriteInstruction?: string) =>
+    request<Continuation>(`/api/novels/${novelId}/continuations/${continuationId}/rewrite`, {
+      method: 'POST',
+      headers: llmHeaders(),
+      body: JSON.stringify({ review_text: reviewText, rewrite_instruction: rewriteInstruction || null }),
+    }),
 
   getLlmConfigDefaults: () =>
     request<{ base_url: string; api_key: string; model: string }>('/api/llm/config'),

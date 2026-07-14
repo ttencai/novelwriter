@@ -601,6 +601,11 @@ def _resolve_generation_billing_source(request: Request) -> str:
     return resolve_generation_billing_source(request)
 
 
+def _generation_quota_enforced() -> bool:
+    settings = get_settings()
+    return settings.deploy_mode != "selfhost" and settings.generation_quota_enabled
+
+
 def check_generation_quota(
     request: Request,
     db: Session = Depends(get_db),
@@ -613,8 +618,7 @@ def check_generation_quota(
     """
     ensure_ai_available(db, billing_source=_resolve_generation_billing_source(request))
 
-    settings = get_settings()
-    if settings.deploy_mode == "selfhost":
+    if not _generation_quota_enforced():
         return current_user
 
     if reconcile_abandoned_quota_reservations(db, user_id=current_user.id) > 0:
@@ -634,8 +638,7 @@ def decrement_quota(db: Session, user: User, count: int = 1) -> None:
 
     Call this in the endpoint body after validating num_versions.
     """
-    settings = get_settings()
-    if settings.deploy_mode == "selfhost":
+    if not _generation_quota_enforced():
         return
     if count <= 0:
         return
@@ -668,8 +671,7 @@ def reconcile_abandoned_quota_reservations(db: Session, *, user_id: int | None =
     In the current single-process hosted architecture, any open row from another
     lease token is abandoned and safe to reconcile immediately.
     """
-    settings = get_settings()
-    if settings.deploy_mode == "selfhost":
+    if not _generation_quota_enforced():
         return 0
 
     stmt = sa.select(QuotaReservation).where(
@@ -713,8 +715,7 @@ def reconcile_abandoned_quota_reservations(db: Session, *, user_id: int | None =
 
 def open_quota_reservation(db: Session, user_id: int, count: int = 1) -> int | None:
     """Reserve quota and create a durable reservation row in one transaction."""
-    settings = get_settings()
-    if settings.deploy_mode == "selfhost":
+    if not _generation_quota_enforced():
         return None
     if count <= 0:
         return None
@@ -753,8 +754,7 @@ def charge_quota_reservation(
     commit: bool = True,
 ) -> None:
     """Persist a delivered-unit charge against an open reservation."""
-    settings = get_settings()
-    if settings.deploy_mode == "selfhost":
+    if not _generation_quota_enforced():
         return
     if reservation_id is None or n <= 0:
         return
@@ -894,8 +894,7 @@ def reserve_quota(db: Session, user_id: int, count: int = 1) -> None:
     Callers should `refund_quota()` on failure paths so users only pay for
     successful generations.
     """
-    settings = get_settings()
-    if settings.deploy_mode == "selfhost":
+    if not _generation_quota_enforced():
         return
     if count <= 0:
         return
@@ -911,8 +910,7 @@ def reserve_quota(db: Session, user_id: int, count: int = 1) -> None:
 
 def refund_quota(db: Session, user_id: int, count: int = 1) -> None:
     """Refund previously reserved quota (best-effort). Hosted mode only."""
-    settings = get_settings()
-    if settings.deploy_mode == "selfhost":
+    if not _generation_quota_enforced():
         return
     if count <= 0:
         return
@@ -931,8 +929,7 @@ def try_decrement_quota(db: Session, user_id: int, count: int = 1) -> bool:
     Unlike decrement_quota(), this never raises — safe to call inside
     async generators where HTTPException can't propagate cleanly.
     """
-    settings = get_settings()
-    if settings.deploy_mode == "selfhost":
+    if not _generation_quota_enforced():
         return True
 
     result = db.execute(

@@ -1,3 +1,32 @@
+export interface SkillItem {
+  name: string
+  enabled: boolean
+  path: string
+  has_readme: boolean
+  has_skill_file: boolean
+  source: string
+}
+
+export interface SkillGroup {
+  name: string
+  path: string
+  skill_count: number
+  enabled_count: number
+  skills: SkillItem[]
+}
+
+export interface SkillsSummary {
+  total: number
+  common: number
+  user: number
+  enabled: number
+}
+
+export interface SkillsResponse {
+  summary: SkillsSummary
+  groups: SkillGroup[]
+}
+
 export interface Novel {
   id: number
   title: string
@@ -106,6 +135,20 @@ export interface Continuation {
   content: string
   rating: number | null
   created_at: string
+}
+
+export interface ContinuationPolishResponse {
+  continuation_id: number
+  original_content: string
+  polished_content: string
+}
+
+export interface ContinuationReviewResponse {
+  continuation_id: number
+  original_content: string
+  review_model: string | null
+  review_text: string
+  rewrite_instruction: string
 }
 
 export interface ContinueResponse {

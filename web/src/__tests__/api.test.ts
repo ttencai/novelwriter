@@ -192,7 +192,7 @@ describe('api service', () => {
   })
 
   it('attaches BYOK LLM headers to LLM endpoints only', async () => {
-    setLlmConfig({ baseUrl: 'http://example.com/v1', apiKey: 'sk-test', model: 'm' })
+    setLlmConfig({ baseUrl: 'http://example.com/v1', apiKey: 'sk-test', model: 'm', reasoningEffort: 'high' })
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({ continuations: [], debug: {} }), { status: 200 }))
@@ -204,6 +204,7 @@ describe('api service', () => {
     expect(headers['X-LLM-Base-Url']).toBe('http://example.com/v1')
     expect(headers['X-LLM-Api-Key']).toBe('sk-test')
     expect(headers['X-LLM-Model']).toBe('m')
+    expect(headers['X-LLM-Reasoning-Effort']).toBe('high')
 
     await api.testLlmConnection()
     const init2 = fetchSpy.mock.calls[1][1]
@@ -211,6 +212,7 @@ describe('api service', () => {
     expect(headers2['X-LLM-Base-Url']).toBe('http://example.com/v1')
     expect(headers2['X-LLM-Api-Key']).toBe('sk-test')
     expect(headers2['X-LLM-Model']).toBe('m')
+    expect(headers2['X-LLM-Reasoning-Effort']).toBe('high')
   })
 
   it('keeps saved model config after a refresh-like module reload and uses it for LLM calls', async () => {
@@ -218,6 +220,7 @@ describe('api service', () => {
       baseUrl: 'https://saved.example/v1',
       apiKey: 'sk-saved',
       model: 'gpt-saved',
+      reasoningEffort: 'medium',
     }))
     vi.resetModules()
 
@@ -232,10 +235,11 @@ describe('api service', () => {
     expect(headers['X-LLM-Base-Url']).toBe('https://saved.example/v1')
     expect(headers['X-LLM-Api-Key']).toBe('sk-saved')
     expect(headers['X-LLM-Model']).toBe('gpt-saved')
+    expect(headers['X-LLM-Reasoning-Effort']).toBe('medium')
   })
 
   it('streamContinuation attaches BYOK LLM headers', async () => {
-    setLlmConfig({ baseUrl: 'http://example.com/v1', apiKey: 'sk-test', model: 'm' })
+    setLlmConfig({ baseUrl: 'http://example.com/v1', apiKey: 'sk-test', model: 'm', reasoningEffort: 'low' })
 
     const ndjson = '{"type":"start","variant":0,"total_variants":1}\n{"type":"done","continuation_ids":[1]}\n'
     const encoder = new TextEncoder()
@@ -259,6 +263,7 @@ describe('api service', () => {
     expect(headers['X-LLM-Base-Url']).toBe('http://example.com/v1')
     expect(headers['X-LLM-Api-Key']).toBe('sk-test')
     expect(headers['X-LLM-Model']).toBe('m')
+    expect(headers['X-LLM-Reasoning-Effort']).toBe('low')
   })
 
   it('triggerBootstrap attaches BYOK LLM headers', async () => {

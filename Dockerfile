@@ -42,6 +42,7 @@ COPY alembic.ini .
 COPY data/common_words/ data/common_words/
 COPY data/demo/ data/demo/
 COPY data/worldpacks/ data/worldpacks/
+COPY data/skills/common/ data/skills/common/
 
 # Stage 3: Runtime image
 FROM python:3.13-slim
