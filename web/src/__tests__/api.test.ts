@@ -192,7 +192,8 @@ describe('api service', () => {
   })
 
   it('attaches BYOK LLM headers to LLM endpoints only', async () => {
-    setLlmConfig({ baseUrl: 'http://example.com/v1', apiKey: 'sk-test', model: 'm', reasoningEffort: 'high' })
+    // Verify a newly added effort level reaches both generation and connection tests.
+    setLlmConfig({ baseUrl: 'http://example.com/v1', apiKey: 'sk-test', model: 'm', reasoningEffort: 'max' })
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(JSON.stringify({ continuations: [], debug: {} }), { status: 200 }))
@@ -204,7 +205,7 @@ describe('api service', () => {
     expect(headers['X-LLM-Base-Url']).toBe('http://example.com/v1')
     expect(headers['X-LLM-Api-Key']).toBe('sk-test')
     expect(headers['X-LLM-Model']).toBe('m')
-    expect(headers['X-LLM-Reasoning-Effort']).toBe('high')
+    expect(headers['X-LLM-Reasoning-Effort']).toBe('max')
 
     await api.testLlmConnection()
     const init2 = fetchSpy.mock.calls[1][1]
@@ -212,7 +213,7 @@ describe('api service', () => {
     expect(headers2['X-LLM-Base-Url']).toBe('http://example.com/v1')
     expect(headers2['X-LLM-Api-Key']).toBe('sk-test')
     expect(headers2['X-LLM-Model']).toBe('m')
-    expect(headers2['X-LLM-Reasoning-Effort']).toBe('high')
+    expect(headers2['X-LLM-Reasoning-Effort']).toBe('max')
   })
 
   it('keeps saved model config after a refresh-like module reload and uses it for LLM calls', async () => {

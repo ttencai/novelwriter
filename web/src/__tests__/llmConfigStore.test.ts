@@ -82,10 +82,11 @@ describe('llmConfigStore', () => {
   })
 
   it('persists reasoning effort when selected', () => {
-    setLlmConfig({ reasoningEffort: 'high' })
+    // The newest explicit level should survive normalization and persistence.
+    setLlmConfig({ reasoningEffort: 'max' })
 
-    expect(getLlmConfig().reasoningEffort).toBe('high')
-    expect(localStorage.getItem('novwr_llm_config_v1')).toContain('high')
+    expect(getLlmConfig().reasoningEffort).toBe('max')
+    expect(localStorage.getItem('novwr_llm_config_v1')).toContain('max')
   })
 
   it('ignores unsupported reasoning effort values', () => {

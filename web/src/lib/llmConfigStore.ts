@@ -1,4 +1,5 @@
-export type ReasoningEffort = '' | 'low' | 'medium' | 'high'
+// An empty value keeps the provider default; the other values are sent explicitly.
+export type ReasoningEffort = '' | 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export interface LlmConfig {
   baseUrl: string
@@ -18,7 +19,14 @@ const STORAGE_KEY = 'novwr_llm_config_v1'
 
 
 function normalizeReasoningEffort(value: unknown): ReasoningEffort {
-  return value === 'low' || value === 'medium' || value === 'high' ? value : ''
+  return value === 'none'
+    || value === 'low'
+    || value === 'medium'
+    || value === 'high'
+    || value === 'xhigh'
+    || value === 'max'
+    ? value
+    : ''
 }
 
 function normalize(value: Partial<LlmConfig>): LlmConfig {

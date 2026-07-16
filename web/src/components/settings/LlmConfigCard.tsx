@@ -8,10 +8,14 @@ import { clearLlmConfig, getLlmConfig, initializeLlmConfig, setLlmConfig, type R
 const IS_HOSTED = (import.meta.env.VITE_DEPLOY_MODE || "selfhost") === "hosted"
 
 const REASONING_EFFORT_OPTIONS: Array<{ value: ReasoningEffort; labelKey: UiMessageKey }> = [
+    // Keep the provider default separate from explicitly disabling reasoning.
     { value: "", labelKey: "llm.reasoning.default" },
+    { value: "none", labelKey: "llm.reasoning.none" },
     { value: "low", labelKey: "llm.reasoning.low" },
     { value: "medium", labelKey: "llm.reasoning.medium" },
     { value: "high", labelKey: "llm.reasoning.high" },
+    { value: "xhigh", labelKey: "llm.reasoning.xhigh" },
+    { value: "max", labelKey: "llm.reasoning.max" },
 ]
 
 export function LlmConfigCard() {
@@ -237,7 +241,7 @@ export function LlmConfigCard() {
                     <span className="text-xs text-muted-foreground">⌄</span>
                 </button>
                 {showReasoningList ? (
-                    <div className="absolute top-full z-20 mt-1 w-full overflow-auto rounded-xl border border-[var(--nw-glass-border)] bg-[hsl(var(--background))] p-1 shadow-2xl">
+                    <div className="absolute top-full z-20 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-[var(--nw-glass-border)] bg-[hsl(var(--background))] p-1 shadow-2xl">
                         {REASONING_EFFORT_OPTIONS.map((item) => (
                             <button
                                 key={item.value || 'default'}

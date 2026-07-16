@@ -17,6 +17,9 @@ LLM_API_KEY_HEADER = "x-llm-api-key"
 LLM_MODEL_HEADER = "x-llm-model"
 LLM_REASONING_EFFORT_HEADER = "x-llm-reasoning-effort"
 
+# Keep the accepted values aligned with the reasoning levels exposed by current OpenAI models.
+SUPPORTED_REASONING_EFFORTS = frozenset({"none", "low", "medium", "high", "xhigh", "max"})
+
 LLM_CONFIG_INCOMPLETE_CODE = "llm_config_incomplete"
 LLM_CONFIG_INCOMPLETE_MESSAGE = (
     "BYOK requires X-LLM-Base-Url, X-LLM-Api-Key, and X-LLM-Model together."
@@ -25,7 +28,7 @@ LLM_CONFIG_INCOMPLETE_MESSAGE = (
 
 def normalize_reasoning_effort(value: str | None) -> str | None:
     normalized = (value or "").strip().lower()
-    return normalized if normalized in {"low", "medium", "high"} else None
+    return normalized if normalized in SUPPORTED_REASONING_EFFORTS else None
 
 
 @dataclass(frozen=True)

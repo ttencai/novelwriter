@@ -5,12 +5,25 @@ import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from pydantic import BaseModel
-from app.core.ai_client import AIClient, _estimate_cost, get_client
+from app.core.ai_client import (
+    AIClient,
+    _chat_reasoning_kwargs,
+    _estimate_cost,
+    _reasoning_kwargs,
+    get_client,
+)
 
 
 @pytest.fixture
 def client():
     return AIClient()
+
+
+@pytest.mark.parametrize("effort", ["none", "low", "medium", "high", "xhigh", "max"])
+def test_reasoning_helpers_accept_all_supported_levels(effort):
+    # Both API styles must preserve every supported reasoning level.
+    assert _reasoning_kwargs(effort) == {"reasoning": {"effort": effort}}
+    assert _chat_reasoning_kwargs(effort) == {"reasoning_effort": effort}
 
 
 # --- Config building ---

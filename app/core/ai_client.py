@@ -6,6 +6,7 @@ import logging
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 from app.config import get_settings
+from app.core.llm_request import SUPPORTED_REASONING_EFFORTS
 from app.core.safety_fuses import ensure_ai_available_fresh_session
 
 logger = logging.getLogger(__name__)
@@ -299,12 +300,14 @@ async def _collect_response_stream_text(stream: Any) -> tuple[str, Any, int, int
 
 
 def _reasoning_kwargs(reasoning_effort: str | None) -> dict[str, Any]:
-    if reasoning_effort in {"low", "medium", "high"}:
+    # Responses API uses a nested reasoning object for every supported effort level.
+    if reasoning_effort in SUPPORTED_REASONING_EFFORTS:
         return {"reasoning": {"effort": reasoning_effort}}
     return {}
 
 def _chat_reasoning_kwargs(reasoning_effort: str | None) -> dict[str, Any]:
-    if reasoning_effort in {"low", "medium", "high"}:
+    # Chat Completions-compatible gateways receive the equivalent flat field.
+    if reasoning_effort in SUPPORTED_REASONING_EFFORTS:
         return {"reasoning_effort": reasoning_effort}
     return {}
 
