@@ -13,6 +13,7 @@ import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { novelKeys } from '@/hooks/novel/keys'
 import { api } from '@/services/api'
 import { LENGTH_OPTIONS } from '@/hooks/novel/useContinuationSetupState'
+import type { ContinuationMode } from '@/types/api'
 
 /**
  * Embeddable continuation-setup stage for the Studio center area.
@@ -27,6 +28,8 @@ export function ContinuationSetupStage({
   chapterReference,
   instruction,
   onInstructionChange,
+  mode,
+  onModeChange,
   selectedLength,
   onSelectedLengthChange,
   advancedOpen,
@@ -44,6 +47,8 @@ export function ContinuationSetupStage({
   chapterReference: string | null
   instruction: string
   onInstructionChange: (next: string) => void
+  mode: ContinuationMode
+  onModeChange: (next: ContinuationMode) => void
   selectedLength: string
   onSelectedLengthChange: (next: string) => void
   advancedOpen: boolean
@@ -95,15 +100,53 @@ export function ContinuationSetupStage({
           {t('continuation.setup.title')}
         </h2>
 
+        {/* Generation Mode */}
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium text-foreground">
+            {t('continuation.setup.mode')}
+          </legend>
+          <div className="grid grid-cols-2 gap-2">
+            {(['continue', 'polish'] as const).map((item) => {
+              const selected = mode === item
+              return (
+                <label
+                  key={item}
+                  className={cn(
+                    'flex min-h-[64px] cursor-pointer flex-col justify-center rounded-xl border px-3 py-2 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
+                    selected
+                      ? 'border-accent bg-[hsl(var(--accent)/0.12)] text-accent'
+                      : 'border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] text-foreground hover:bg-[var(--nw-glass-bg-hover)]',
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="continuation-mode"
+                    value={item}
+                    checked={selected}
+                    onChange={() => onModeChange(item)}
+                    className="sr-only"
+                  />
+                  <span className="text-sm font-semibold">
+                    {t(`continuation.setup.mode.${item}`)}
+                  </span>
+                  <span className="mt-1 text-xs text-muted-foreground">
+                    {t(`continuation.setup.mode.${item}Description`)}
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+        </fieldset>
+
         {/* Instruction */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-foreground">
-            {t('continuation.setup.instruction')}
+            {t(mode === 'polish' ? 'continuation.setup.polishInstruction' : 'continuation.setup.instruction')}
           </label>
           <Textarea
             value={instruction}
             onChange={e => onInstructionChange(e.target.value)}
-            placeholder={t('continuation.setup.instructionPlaceholder')}
+            placeholder={t(mode === 'polish' ? 'continuation.setup.polishInstructionPlaceholder' : 'continuation.setup.instructionPlaceholder')}
             className="min-h-[80px] resize-none text-[13px] leading-relaxed bg-[var(--nw-glass-bg)] border-[var(--nw-glass-border)] text-foreground placeholder:text-muted-foreground/70 focus-visible:ring-accent focus-visible:ring-offset-0"
           />
         </div>
@@ -183,12 +226,12 @@ export function ContinuationSetupStage({
         <NwButton
           data-testid="studio-generate-button"
           onClick={onGenerate}
-          disabled={!novelId}
+          disabled={!novelId || (mode === 'polish' && !instruction.trim())}
           variant="accent"
           className="w-full h-12 rounded-xl shadow-[0_4px_24px_hsl(var(--accent)/0.25)] text-[15px] font-semibold disabled:cursor-default"
         >
           <Sparkles size={18} />
-          {t('continuation.setup.generate')}
+          {t(mode === 'polish' ? 'continuation.setup.polish' : 'continuation.setup.generate')}
         </NwButton>
       </aside>
     </div>

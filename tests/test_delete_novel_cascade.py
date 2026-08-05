@@ -32,6 +32,7 @@ from app.models import (
     User,
     WorldEntity,
     WorldEntityAttribute,
+    WorldEntityChangeProposal,
     WorldRelationship,
     WorldSystem,
 )
@@ -116,7 +117,19 @@ def test_delete_novel_cascades_to_world_and_explorations(db, tmp_path):
     rel = WorldRelationship(novel_id=novel.id, source_id=e1.id, target_id=e2.id, label="friend", description="")
     sys = WorldSystem(novel_id=novel.id, name="sys", display_type="hierarchy", description="", data={}, constraints=[])
     job = BootstrapJob(novel_id=novel.id, mode="initial", status="pending", initialized=False)
-    db.add_all([attr, rel, sys, job])
+    change = WorldEntityChangeProposal(
+        novel_id=novel.id,
+        chapter_id=chapter.id,
+        chapter_number=1,
+        entity_id=e1.id,
+        entity_name=e1.name,
+        summary="更新",
+        evidence="证据",
+        delta={},
+        fingerprint="delete-test",
+        status="pending",
+    )
+    db.add_all([attr, rel, sys, job, change])
 
     # Exploration tables (NOT ORM-cascaded off Novel).
     exp = Exploration(novel_id=novel.id, name="exp", description="", from_chapter=1, to_chapter=1)
@@ -154,6 +167,7 @@ def test_delete_novel_cascades_to_world_and_explorations(db, tmp_path):
     assert db.query(LoreKey).count() == 0
 
     assert db.query(WorldRelationship).filter(WorldRelationship.novel_id == novel.id).count() == 0
+    assert db.query(WorldEntityChangeProposal).filter(WorldEntityChangeProposal.novel_id == novel.id).count() == 0
     assert db.query(WorldEntity).filter(WorldEntity.novel_id == novel.id).count() == 0
     assert db.query(WorldSystem).filter(WorldSystem.novel_id == novel.id).count() == 0
     assert db.query(BootstrapJob).filter(BootstrapJob.novel_id == novel.id).count() == 0

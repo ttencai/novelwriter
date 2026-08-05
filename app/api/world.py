@@ -53,6 +53,11 @@ from app.core.world.crud import (
     load_system,
 )
 from app.core.world.generation_application import generate_world_from_text as generate_world_from_text_use_case
+from app.core.world.entity_change_application import (
+    EntityChangeProposalError,
+    apply_entity_change_proposal,
+    reject_entity_change_proposal,
+)
 from app.core.world.use_case_errors import WorldUseCaseDetailError, WorldUseCaseError
 from app.core.world.worldpack_import import (
     UnsupportedWorldpackSchemaVersionError,
@@ -68,6 +73,7 @@ from app.models import (
     Novel,
     User,
     WorldEntity,
+    WorldEntityChangeProposal,
     WorldRelationship,
     WorldSystem,
 )
@@ -87,6 +93,7 @@ from app.schemas import (
     WorldEntityAttributeResponse,
     WorldEntityCreate,
     WorldEntityDetailResponse,
+    WorldEntityChangeProposalResponse,
     WorldEntityResponse,
     WorldEntityUpdate,
     WorldRelationshipCreate,
@@ -112,6 +119,7 @@ router = APIRouter(
     dependencies=[Depends(verify_novel_access)],
 )
 WorldModelRowStatus = Literal["draft", "confirmed"]
+EntityChangeStatus = Literal["pending", "applied", "rejected"]
 _T = TypeVar("_T")
 
 
@@ -227,6 +235,74 @@ def _serialize_bootstrap_job(job: BootstrapJob) -> BootstrapJobResponse:
 # ===========================================================================
 # Entities
 # ===========================================================================
+
+
+@router.get("/entity-changes", response_model=List[WorldEntityChangeProposalResponse])
+def list_entity_changes(
+    novel_id: int,
+    status: Optional[EntityChangeStatus] = "pending",
+    entity_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_default),
+):
+    """List chapter-sourced entity changes waiting for user review."""
+    _get_novel(novel_id, db)
+    query = db.query(WorldEntityChangeProposal).filter(WorldEntityChangeProposal.novel_id == novel_id)
+    if status:
+        query = query.filter(WorldEntityChangeProposal.status == status)
+    if entity_id is not None:
+        query = query.filter(WorldEntityChangeProposal.entity_id == entity_id)
+    return query.order_by(
+        WorldEntityChangeProposal.chapter_number.desc(),
+        WorldEntityChangeProposal.id.desc(),
+    ).all()
+
+
+@router.post("/entity-changes/{proposal_id}/apply", response_model=WorldEntityChangeProposalResponse)
+def apply_entity_change(
+    novel_id: int,
+    proposal_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_default),
+):
+    """Apply one reviewed entity change."""
+    _get_novel(novel_id, db)
+    try:
+        return apply_entity_change_proposal(
+            novel_id,
+            proposal_id,
+            user_id=current_user.id,
+            db=db,
+        )
+    except EntityChangeProposalError as exc:
+        _raise_entity_change_error(exc)
+
+
+@router.post("/entity-changes/{proposal_id}/reject", response_model=WorldEntityChangeProposalResponse)
+def reject_entity_change(
+    novel_id: int,
+    proposal_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user_or_default),
+):
+    """Reject one reviewed entity change."""
+    _get_novel(novel_id, db)
+    try:
+        return reject_entity_change_proposal(
+            novel_id,
+            proposal_id,
+            user_id=current_user.id,
+            db=db,
+        )
+    except EntityChangeProposalError as exc:
+        _raise_entity_change_error(exc)
+
+
+def _raise_entity_change_error(exc: EntityChangeProposalError) -> None:
+    code = str(exc)
+    if code in {"proposal_not_found", "entity_not_found"}:
+        raise HTTPException(status_code=404, detail=code) from exc
+    raise HTTPException(status_code=409, detail=code) from exc
 
 
 @router.get("/entities", response_model=List[WorldEntityResponse])

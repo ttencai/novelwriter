@@ -60,4 +60,44 @@ describe('useContinuationSetupState', () => {
       expect(result.current.instruction).toBe('')
     })
   })
+
+  it('sends polish mode with the selected output length', async () => {
+    const { result } = renderHook(
+      () => useContinuationSetupState(1, 3),
+      { wrapper },
+    )
+    await act(async () => { await Promise.resolve() })
+
+    act(() => {
+      result.current.setMode('polish')
+      result.current.setInstruction('草稿正文。要求：调整语序。')
+    })
+    act(() => result.current.handleGenerate())
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      expect.stringContaining('/novel/1?'),
+      expect.objectContaining({
+        state: expect.objectContaining({
+          streamParams: expect.objectContaining({
+            mode: 'polish',
+            prompt: '草稿正文。要求：调整语序。',
+            target_chars: 4000,
+          }),
+        }),
+      }),
+    )
+  })
+
+  it('does not start polish mode without a draft', async () => {
+    const { result } = renderHook(
+      () => useContinuationSetupState(1, 3),
+      { wrapper },
+    )
+    await act(async () => { await Promise.resolve() })
+
+    act(() => result.current.setMode('polish'))
+    act(() => result.current.handleGenerate())
+
+    expect(mockNavigate).not.toHaveBeenCalled()
+  })
 })

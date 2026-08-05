@@ -13,6 +13,7 @@ const mockUseUpdateChapter = vi.fn()
 const mockUseCreateChapter = vi.fn()
 const mockUseDeleteChapter = vi.fn()
 const mockUseWorldEntities = vi.fn()
+const mockUsePendingEntityChanges = vi.fn()
 const mockUseWorldSystems = vi.fn()
 const mockUseBootstrapStatus = vi.fn()
 const mockUseTriggerBootstrap = vi.fn()
@@ -118,6 +119,10 @@ vi.mock('@/hooks/world/useEntities', () => ({
   useWorldEntities: (...args: unknown[]) => mockUseWorldEntities(...args),
 }))
 
+vi.mock('@/hooks/world/useEntityChanges', () => ({
+  usePendingEntityChanges: (...args: unknown[]) => mockUsePendingEntityChanges(...args),
+}))
+
 vi.mock('@/hooks/world/useSystems', () => ({
   useWorldSystems: (...args: unknown[]) => mockUseWorldSystems(...args),
 }))
@@ -147,6 +152,25 @@ vi.mock('@/services/api', () => ({
     listChapters: vi.fn(),
   },
   copilotApi: {
+    openSession: vi.fn().mockResolvedValue({
+      session_id: 'assistant-chat-session-1',
+      signature: 'assistant-chat-sig-1',
+      mode: 'research',
+      scope: 'whole_book',
+      context: null,
+      interaction_locale: 'zh',
+      display_title: '',
+      created: true,
+      created_at: new Date().toISOString(),
+    }),
+    listRuns: vi.fn().mockResolvedValue([]),
+    createRun: vi.fn(),
+    pollRun: vi.fn(),
+    pollLatestRun: vi.fn().mockResolvedValue(null),
+    applySuggestions: vi.fn(),
+    dismissSuggestions: vi.fn(),
+  },
+  assistantChatApi: {
     openSession: vi.fn().mockResolvedValue({
       session_id: 'assistant-chat-session-1',
       signature: 'assistant-chat-sig-1',
@@ -225,6 +249,7 @@ describe('NovelStudioPage', () => {
       data: [{ id: 1, name: '主角' }],
       isLoading: false,
     })
+    mockUsePendingEntityChanges.mockReturnValue({ data: [] })
     mockUseWorldSystems.mockReturnValue({
       data: [],
       isLoading: false,

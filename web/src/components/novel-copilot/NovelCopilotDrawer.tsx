@@ -211,7 +211,7 @@ function ActiveNovelCopilotDrawer({
         }
       } catch {
         if (cancelled) return
-        setModelOptions((current) => current.length > 0 ? current : (selectedModel ? [selectedModel] : []))
+        setModelOptions((current) => current.length > 0 ? current : (currentConfig.model ? [currentConfig.model] : []))
         toast(t('copilot.drawer.modelLoadFailed'))
       } finally {
         if (!cancelled) setModelsLoading(false)

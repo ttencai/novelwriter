@@ -47,10 +47,15 @@ export function getCopilotSuggestionKindMeta(kind: string, locale?: UiLocale) {
   const effectiveLocale = readLocale(locale)
   switch (kind) {
     case 'create_entity':
+      return {
+        label: translateUiMessage(effectiveLocale, 'copilot.suggestion.kind.createEntity'),
+        chipClassName: 'border-[hsl(var(--foreground)/0.12)] bg-[hsl(var(--foreground)/0.06)] text-foreground/82',
+        accentClassName: 'bg-[hsl(var(--foreground)/0.52)]',
+      }
     case 'update_entity':
     case 'entity_update':
       return {
-        label: translateUiMessage(effectiveLocale, 'copilot.suggestion.kind.entity'),
+        label: translateUiMessage(effectiveLocale, 'copilot.suggestion.kind.updateEntity'),
         chipClassName: 'border-[hsl(var(--foreground)/0.12)] bg-[hsl(var(--foreground)/0.06)] text-foreground/82',
         accentClassName: 'bg-[hsl(var(--foreground)/0.52)]',
       }

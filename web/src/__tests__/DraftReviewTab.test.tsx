@@ -86,6 +86,8 @@ describe('DraftReviewTab', () => {
     expect(screen.queryByRole('button', { name: /确认 全部/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /拒绝 全部/ })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '查看' })).toBeInTheDocument()
+    expect(screen.getByText('角色')).toBeInTheDocument()
+    expect(screen.queryByText('Character')).not.toBeInTheDocument()
   })
 
   it('renders English draft review actions when the UI locale is en', () => {
@@ -106,6 +108,7 @@ describe('DraftReviewTab', () => {
     )
 
     expect(screen.getByText('Entities (1)')).toBeInTheDocument()
+    expect(screen.getByText('Character')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'View' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument()
   })

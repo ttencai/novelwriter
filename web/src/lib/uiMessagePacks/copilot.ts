@@ -71,6 +71,8 @@ export const copilotZhMessages = {
   'copilot.aiStatus.error': 'AI 异常',
 
   'copilot.suggestion.kind.entity': '实体',
+  'copilot.suggestion.kind.createEntity': '新增',
+  'copilot.suggestion.kind.updateEntity': '修改',
   'copilot.suggestion.kind.relationship': '关系',
   'copilot.suggestion.kind.system': '体系',
   'copilot.suggestion.source.chapterExcerpt': '章节片段',
@@ -298,6 +300,8 @@ export const copilotEnMessages = {
   'copilot.aiStatus.error': 'AI error',
 
   'copilot.suggestion.kind.entity': 'Entity',
+  'copilot.suggestion.kind.createEntity': 'Create',
+  'copilot.suggestion.kind.updateEntity': 'Update',
   'copilot.suggestion.kind.relationship': 'Relationship',
   'copilot.suggestion.kind.system': 'System',
   'copilot.suggestion.source.chapterExcerpt': 'Chapter excerpt',

@@ -16,6 +16,7 @@ Architecture invariants:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -33,6 +34,7 @@ from app.core.ai_client import AIClient, ToolCallUnsupportedError
 from app.core.auth import settle_quota_reservation
 from app.core.copilot.apply import ApplyResult, apply_suggestions
 from app.core.copilot.messages import CopilotTextKey, get_copilot_text
+from app.core.copilot.lease import await_with_run_lease_heartbeat
 from app.language import normalize_copilot_interaction_locale
 from app.core.copilot.prompting import (
     apply_quick_action_prompt,
@@ -52,11 +54,15 @@ from app.core.copilot.scope import (
     CopilotFocusVariant,
     CopilotRuntimeProfile,
     EvidenceItem,
+    MAX_EVIDENCE_ITEMS,
     ScopeSnapshot,
     derive_focus_variant,
     derive_runtime_profile,
     gather_evidence,
+    gather_explicit_query_evidence,
     load_scope_snapshot,
+    prompt_mentions_known_entity,
+    prompt_may_reference_workspace,
 )
 from app.core.copilot.research_tools import (
     _TOOL_SCHEMAS,
@@ -137,9 +143,12 @@ def _assistant_chat_evidence_from_workspace(
     return list(base_evidence)
 
 
-def _build_plain_assistant_chat_system_prompt(interaction_locale: str = "zh") -> str:
+def _build_plain_assistant_chat_system_prompt(
+    interaction_locale: str = "zh",
+    evidence: list[EvidenceItem] | None = None,
+) -> str:
     if interaction_locale == "en":
-        return (
+        base = (
             "You are a normal multi-turn AI chat assistant.\n"
             "Answer the user directly.\n"
             "Do not assume the current novel, world model, or research workspace is the topic unless the user explicitly asks about it.\n"
@@ -147,14 +156,46 @@ def _build_plain_assistant_chat_system_prompt(interaction_locale: str = "zh") ->
             "Use earlier chat turns when they matter.\n"
             "For everyday questions, real-world knowledge, writing, translation, and coding requests, respond like a standard chat assistant."
         )
-    return (
-        "你是一个普通的多轮 AI 聊天助手。\n"
-        "直接回答用户问题。\n"
-        "除非用户明确要求讨论当前小说、世界模型或工作台，否则不要默认把它们当作回答前提。\n"
-        "不要把回答表述成“全书探索”“全书研究”“工作台分析”之类的口吻。\n"
-        "需要时结合本会话前文继续回答。\n"
-        "对于日常聊天、现实问题、写作、翻译、代码等请求，都按普通聊天助手方式直接作答。"
-    )
+    else:
+        base = (
+            "你是一个普通的多轮 AI 聊天助手。\n"
+            "直接回答用户问题。\n"
+            "除非用户明确要求讨论当前小说、世界模型或工作台，否则不要默认把它们当作回答前提。\n"
+            "不要把回答表述成“全书探索”“全书研究”“工作台分析”之类的口吻。\n"
+            "需要时结合本会话前文继续回答。\n"
+            "对于日常聊天、现实问题、写作、翻译、代码等请求，都按普通聊天助手方式直接作答。"
+        )
+    if not evidence:
+        return base
+    return f"{base}\n\n{_format_assistant_workspace_evidence(evidence, interaction_locale)}"
+
+
+def _format_assistant_workspace_evidence(
+    evidence: list[EvidenceItem],
+    interaction_locale: str,
+) -> str:
+    """把用户明确查询到的小说证据加入普通对话，不启用修改建议。"""
+    if interaction_locale == "en":
+        heading = "Current-novel evidence requested by the user. Answer from this evidence and do not invent missing prose:"
+    else:
+        heading = "以下是用户本轮明确查询的当前小说证据。请据此回答，不要编造缺失正文："
+    parts = [heading]
+    for index, item in enumerate(evidence, 1):
+        parts.append(f"[Evidence#{index}] {item.title}\n{item.excerpt}")
+    return "\n\n".join(parts)
+
+
+def _merge_evidence_items(*groups: list[EvidenceItem]) -> list[EvidenceItem]:
+    merged: list[EvidenceItem] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            if item.evidence_id in seen:
+                continue
+            seen.add(item.evidence_id)
+            merged.append(item)
+    return merged[:MAX_EVIDENCE_ITEMS]
+
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -163,6 +204,7 @@ def _build_plain_assistant_chat_system_prompt(interaction_locale: str = "zh") ->
 MAX_ACTIVE_RUNS_PER_USER = 3
 MAX_EVIDENCE_PACKS = 12
 ACTIVE_RUN_STATUSES = frozenset({"queued", "running"})
+COPILOT_TRANSIENT_RETRY_DELAY_SECONDS = 0.5
 # ---------------------------------------------------------------------------
 # Error type
 # ---------------------------------------------------------------------------
@@ -190,11 +232,85 @@ def _resolve_run_interaction_locale(run: CopilotRun | None) -> str:
     )
 
 
-def _copilot_run_failed_message(interaction_locale: str) -> str:
+def _iter_exception_chain(error: Exception | None):
+    """Yield an exception and its causes once, without exposing their text."""
+
+    seen: set[int] = set()
+    current = error
+    while isinstance(current, Exception) and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def _exception_failure_category(error: Exception | None) -> str:
+    """Map provider/runtime failures to a safe user-facing category."""
+
+    statuses: set[int] = set()
+    signals: list[str] = []
+    for current in _iter_exception_chain(error):
+        status = getattr(current, "status_code", None) or getattr(current, "status", None)
+        if isinstance(status, int):
+            statuses.add(status)
+        signals.append(f"{type(current).__name__} {current}".casefold())
+
+    combined = " ".join(signals)
+    if 429 in statuses or "rate limit" in combined or "too many requests" in combined or " 429" in combined:
+        return "rate_limit"
+    if 401 in statuses or 403 in statuses or "authentication" in combined or "unauthorized" in combined:
+        return "configuration"
+    if 408 in statuses or any(token in combined for token in ("timeout", "timed out", "connection", "network")):
+        return "connection"
+    if any(status >= 500 for status in statuses) or any(
+        token in combined for token in ("service unavailable", "overloaded", "internal server")
+    ):
+        return "service"
+    if statuses.intersection({400, 404, 405, 415, 422}) or any(
+        token in combined for token in ("unsupported", "invalid request", "bad request")
+    ):
+        return "request"
+    return "generic"
+
+
+def _is_transient_copilot_failure(error: Exception | None) -> bool:
+    """Only retry failures that are likely to succeed without changing input."""
+
+    return _exception_failure_category(error) in {"rate_limit", "connection", "service"}
+
+
+def _copilot_run_failed_message(
+    interaction_locale: str,
+    error: Exception | None = None,
+) -> str:
+    message_key = {
+        "rate_limit": CopilotTextKey.RUN_FAILED_RATE_LIMIT,
+        "connection": CopilotTextKey.RUN_FAILED_CONNECTION,
+        "service": CopilotTextKey.RUN_FAILED_SERVICE,
+        "configuration": CopilotTextKey.RUN_FAILED_CONFIGURATION,
+        "request": CopilotTextKey.RUN_FAILED_REQUEST,
+    }.get(_exception_failure_category(error), CopilotTextKey.RUN_FAILED)
     return get_copilot_text(
-        CopilotTextKey.RUN_FAILED,
+        message_key,
         locale=interaction_locale,
     )
+
+
+async def _run_one_shot_with_transient_retry(*args, **kwargs):
+    """Retry the direct-analysis fallback once for temporary provider failures."""
+
+    try:
+        return await _run_one_shot(*args, **kwargs)
+    except RunLeaseLostError:
+        raise
+    except Exception as error:
+        if not _is_transient_copilot_failure(error):
+            raise
+        logger.warning(
+            "Copilot one-shot fallback hit a transient %s failure; retrying once",
+            _exception_failure_category(error),
+        )
+        await asyncio.sleep(COPILOT_TRANSIENT_RETRY_DELAY_SECONDS)
+        return await _run_one_shot(*args, **kwargs)
 
 
 def _copilot_run_interrupted_message(interaction_locale: str) -> str:
@@ -945,6 +1061,18 @@ async def execute_copilot_run(
             if preload_world_context
             else []
         )
+        explicit_evidence = (
+            gather_explicit_query_evidence(
+                db,
+                novel,
+                snapshot,
+                raw_prompt,
+                interaction_locale=session.interaction_locale,
+            )
+            if turn_intent == "task_query"
+            else []
+        )
+        evidence = _merge_evidence_items(explicit_evidence, evidence)
 
         _persist_preloaded_evidence(db, run, evidence)
 
@@ -1004,6 +1132,7 @@ async def execute_copilot_run(
                     worker_id=worker_id,
                     db_factory=db_factory,
                     prior_messages=follow_up_messages,
+                    workspace_evidence=evidence,
                 )
             else:
                 parsed, final_evidence, workspace = await _run_tool_loop(
@@ -1018,7 +1147,7 @@ async def execute_copilot_run(
             logger.info("Tool calls unsupported, degrading to one-shot")
             execution_mode = "one_shot_unsupported"
             degraded_reason = "tools_not_supported"
-            parsed, final_evidence = await _run_one_shot(
+            parsed, final_evidence = await _run_one_shot_with_transient_retry(
                 snapshot, evidence, scenario, session_data, turn_intent, prompt, llm_config, user_id,
                 run_id=run_id, worker_id=worker_id, db_factory=db_factory,
                 assistant_chat=assistant_chat_session,
@@ -1035,7 +1164,7 @@ async def execute_copilot_run(
             try:
                 execution_mode = "one_shot_fallback"
                 degraded_reason = type(tool_loop_exc).__name__
-                parsed, final_evidence = await _run_one_shot(
+                parsed, final_evidence = await _run_one_shot_with_transient_retry(
                     snapshot, evidence, scenario, session_data, turn_intent, prompt, llm_config, user_id,
                     run_id=run_id, worker_id=worker_id, db_factory=db_factory,
                     assistant_chat=assistant_chat_session,
@@ -1045,8 +1174,9 @@ async def execute_copilot_run(
             except RunLeaseLostError:
                 logger.info("Copilot run %s lost lease during fallback execution", run_id)
                 return
-            except Exception:
-                raise tool_loop_exc from None
+            except Exception as fallback_exc:
+                # 保留最终失败原因，便于给用户显示可操作的错误分类。
+                raise fallback_exc from tool_loop_exc
 
         if parsed is None:
             parsed = {"answer": "", "suggestions": []}
@@ -1090,7 +1220,7 @@ async def execute_copilot_run(
         ):
             logger.warning("Skipping result persistence for run %s after lease loss", run_id)
 
-    except Exception:
+    except Exception as run_error:
         logger.exception("Copilot run %s failed", run_id)
         try:
             err_db = SessionLocal()
@@ -1101,7 +1231,10 @@ async def execute_copilot_run(
                         err_db,
                         err_run,
                         "run_execution_error",
-                        _copilot_run_failed_message(_resolve_run_interaction_locale(err_run)),
+                        _copilot_run_failed_message(
+                            _resolve_run_interaction_locale(err_run),
+                            run_error,
+                        ),
                         worker_id=worker_id,
                     )
             finally:
@@ -1118,7 +1251,7 @@ async def execute_assistant_chat_run(
     user_id: int,
     llm_config: dict[str, Any] | None,
 ) -> None:
-    """Execute a plain multi-turn assistant chat run without research scope loading."""
+    """Execute assistant chat, loading novel evidence only for explicit workspace queries."""
     from app.database import SessionLocal
 
     worker_id = uuid.uuid4().hex
@@ -1148,6 +1281,33 @@ async def execute_assistant_chat_run(
             _fail_run(db, run, "novel_not_found", "Novel not found", worker_id=worker_id)
             return
 
+        evidence: list[EvidenceItem] = []
+        turn_intent = classify_turn_intent(run.prompt)
+        if turn_intent == "task_query" and (
+            prompt_may_reference_workspace(run.prompt)
+            or prompt_mentions_known_entity(db, novel.id, run.prompt)
+        ):
+            try:
+                snapshot = load_scope_snapshot(
+                    db,
+                    novel,
+                    session.mode,
+                    session.scope,
+                    canonicalize_session_context(run.context_json)
+                    or canonicalize_session_context(session.context_json),
+                )
+                evidence = gather_explicit_query_evidence(
+                    db,
+                    novel,
+                    snapshot,
+                    run.prompt,
+                    interaction_locale=session.interaction_locale,
+                )
+            except Exception:
+                logger.exception("Assistant chat failed to load explicit novel evidence")
+                evidence = []
+        _persist_preloaded_evidence(db, run, evidence)
+
         prior_completed_runs = (
             db.query(CopilotRun)
             .filter(
@@ -1159,7 +1319,7 @@ async def execute_assistant_chat_run(
             .all()
         )
         follow_up_messages = _build_follow_up_conversation_messages(prior_completed_runs)
-        system_prompt = _build_plain_assistant_chat_system_prompt(session.interaction_locale)
+        system_prompt = _build_plain_assistant_chat_system_prompt(session.interaction_locale, evidence)
         messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
         if follow_up_messages:
             messages.extend(follow_up_messages)
@@ -1170,11 +1330,21 @@ async def execute_assistant_chat_run(
 
         if not _renew_run_lease(db_factory, run_id=run_id, worker_id=worker_id):
             raise RunLeaseLostError(run_id)
-        await acquire_llm_slot()
-        try:
-            answer = await _call_chat_completions_llm(messages, llm_config, user_id)
-        finally:
-            release_llm_slot()
+        async def call_model():
+            await acquire_llm_slot()
+            try:
+                return await _call_chat_completions_llm(messages, llm_config, user_id)
+            finally:
+                release_llm_slot()
+
+        answer = await await_with_run_lease_heartbeat(
+            call_model(),
+            db_factory=db_factory,
+            run_id=run_id,
+            worker_id=worker_id,
+            renew_run_lease=_renew_run_lease,
+            lease_lost_error_factory=RunLeaseLostError,
+        )
         if not _renew_run_lease(db_factory, run_id=run_id, worker_id=worker_id):
             raise RunLeaseLostError(run_id)
 
@@ -1183,7 +1353,7 @@ async def execute_assistant_chat_run(
             run_id=run_id,
             worker_id=worker_id,
             answer=answer,
-            evidence=[],
+            evidence=evidence,
             compiled_suggestions=[],
             workspace=None,
             execution_mode="assistant_chat",
@@ -1193,7 +1363,7 @@ async def execute_assistant_chat_run(
     except RunLeaseLostError:
         logger.info("Assistant chat run %s lost lease during execution", run_id)
         return
-    except Exception:
+    except Exception as run_error:
         logger.exception("Assistant chat run %s failed", run_id)
         try:
             err_db = SessionLocal()
@@ -1204,7 +1374,10 @@ async def execute_assistant_chat_run(
                         err_db,
                         err_run,
                         "run_execution_error",
-                        _copilot_run_failed_message(_resolve_run_interaction_locale(err_run)),
+                        _copilot_run_failed_message(
+                            _resolve_run_interaction_locale(err_run),
+                            run_error,
+                        ),
                         worker_id=worker_id,
                     )
             finally:
@@ -1342,17 +1515,24 @@ async def _run_assistant_chat_completion(
     worker_id: str = "",
     db_factory: Callable[[], Session] | None = None,
     prior_messages: list[dict[str, str]] | None = None,
+    workspace_evidence: list[EvidenceItem] | None = None,
 ) -> tuple[dict[str, Any], list[EvidenceItem]]:
-    system_prompt = build_copilot_system_prompt(
-        snapshot,
-        [],
-        scenario,
-        session_data["interaction_locale"],
-        session_data,
-        turn_intent,
-        assistant_chat=True,
-        preload_world_context=False,
-    )
+    if workspace_evidence:
+        system_prompt = _build_plain_assistant_chat_system_prompt(
+            session_data["interaction_locale"],
+            workspace_evidence,
+        )
+    else:
+        system_prompt = build_copilot_system_prompt(
+            snapshot,
+            [],
+            scenario,
+            session_data["interaction_locale"],
+            session_data,
+            turn_intent,
+            assistant_chat=True,
+            preload_world_context=False,
+        )
     messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
     if prior_messages:
         messages.extend(prior_messages)
@@ -1360,15 +1540,25 @@ async def _run_assistant_chat_completion(
 
     if run_id and worker_id and db_factory and not _renew_run_lease(db_factory, run_id=run_id, worker_id=worker_id):
         raise RunLeaseLostError(run_id)
-    await acquire_llm_slot()
-    try:
-        response_text = await _call_chat_completions_llm(messages, llm_config, user_id)
-    finally:
-        release_llm_slot()
+    async def call_model():
+        await acquire_llm_slot()
+        try:
+            return await _call_chat_completions_llm(messages, llm_config, user_id)
+        finally:
+            release_llm_slot()
+
+    response_text = await await_with_run_lease_heartbeat(
+        call_model(),
+        db_factory=db_factory,
+        run_id=run_id,
+        worker_id=worker_id,
+        renew_run_lease=_renew_run_lease,
+        lease_lost_error_factory=RunLeaseLostError,
+    )
     if run_id and worker_id and db_factory and not _renew_run_lease(db_factory, run_id=run_id, worker_id=worker_id):
         raise RunLeaseLostError(run_id)
 
-    return {"answer": response_text, "suggestions": []}, []
+    return {"answer": response_text, "suggestions": []}, list(workspace_evidence or [])
 
 
 # ---------------------------------------------------------------------------
@@ -1410,11 +1600,21 @@ async def _run_one_shot(
 
     if run_id and worker_id and db_factory and not _renew_run_lease(db_factory, run_id=run_id, worker_id=worker_id):
         raise RunLeaseLostError(run_id)
-    await acquire_llm_slot()
-    try:
-        response_text = await _call_copilot_llm_messages(messages, llm_config, user_id)
-    finally:
-        release_llm_slot()
+    async def call_model():
+        await acquire_llm_slot()
+        try:
+            return await _call_copilot_llm_messages(messages, llm_config, user_id)
+        finally:
+            release_llm_slot()
+
+    response_text = await await_with_run_lease_heartbeat(
+        call_model(),
+        db_factory=db_factory,
+        run_id=run_id,
+        worker_id=worker_id,
+        renew_run_lease=_renew_run_lease,
+        lease_lost_error_factory=RunLeaseLostError,
+    )
     if run_id and worker_id and db_factory and not _renew_run_lease(db_factory, run_id=run_id, worker_id=worker_id):
         raise RunLeaseLostError(run_id)
 

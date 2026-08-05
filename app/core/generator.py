@@ -9,7 +9,7 @@ This module provides:
 2. Multi-model routing support
 """
 
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, List, Literal
 import asyncio
 import math
 import re
@@ -29,6 +29,8 @@ from app.language import resolve_prompt_locale
 from app.language_policy import get_language_policy
 
 logger = logging.getLogger(__name__)
+
+GenerationMode = Literal["continue", "polish"]
 
 
 _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
@@ -72,9 +74,29 @@ def _build_length_guidance(
     return get_snippet(SnippetKey.LENGTH_GUIDANCE_DEFAULT, prompt_locale)
 
 
-def _build_system_prompt(length_guidance: str, *, prompt_locale: str) -> str:
+def _normalize_generation_mode(value: str | None) -> GenerationMode:
+    return "polish" if value == "polish" else "continue"
+
+
+def _build_system_prompt(
+    length_guidance: str,
+    *,
+    prompt_locale: str,
+    generation_mode: GenerationMode = "continue",
+) -> str:
     length_header = get_snippet(SnippetKey.SYSTEM_LENGTH_HEADER, prompt_locale)
     length_rules = get_snippet(SnippetKey.SYSTEM_LENGTH_RULES, prompt_locale)
+    if generation_mode == "polish":
+        base_prompt = get_prompt(PromptKey.DRAFT_POLISH_SYSTEM, locale=prompt_locale)
+        if not length_guidance:
+            return base_prompt
+        return (
+            f"{base_prompt}\n\n"
+            f"{length_header}\n"
+            f"- {length_guidance}\n"
+            f"{length_rules}"
+        )
+
     return (
         f"{get_prompt(PromptKey.SYSTEM, locale=prompt_locale)}\n\n"
         f"{length_header}\n"
@@ -183,16 +205,19 @@ async def _build_continuation_prompt(
     world_context: str | None = None,
     narrative_constraints: str | None = None,
     world_debug_summary: dict | None = None,
+    generation_mode: str = "continue",
 ) -> tuple[str, int, dict]:
     """Build the continuation prompt and return (prompt, effective_max_tokens, build_info)."""
     settings = get_settings()
+    normalized_mode = _normalize_generation_mode(generation_mode)
+    polish_budget_chars = max(1000, len((prompt or "").strip())) if normalized_mode == "polish" else None
     generation_target_chars = _compute_generation_target_chars(
         target_chars,
         settings.continuation_prompt_target_overrun_ratio,
     )
 
     effective_max_tokens = _compute_max_tokens(
-        target_chars=target_chars,
+        target_chars=target_chars or polish_budget_chars,
         max_tokens=max_tokens,
         default_tokens=settings.default_continuation_tokens,
         chars_to_tokens_ratio=settings.continuation_chars_to_tokens_ratio,
@@ -207,12 +232,14 @@ async def _build_continuation_prompt(
         )
     prompt_locale = resolve_prompt_locale(novel_language=getattr(novel, "language", None))
 
-    length_guidance = _build_length_guidance(
-        target_chars,
-        generation_target_chars,
-        settings.continuation_min_target_ratio,
-        prompt_locale=prompt_locale,
-    )
+    length_guidance = ""
+    if normalized_mode == "continue" or target_chars:
+        length_guidance = _build_length_guidance(
+            target_chars,
+            generation_target_chars,
+            settings.continuation_min_target_ratio,
+            prompt_locale=prompt_locale,
+        )
 
     effective_context_chapters = resolve_context_chapters(
         context_chapters,
@@ -232,13 +259,16 @@ async def _build_continuation_prompt(
             f"Novel {novel_id} has no chapters. Cannot generate continuation without existing content."
         )
 
-    outlines = (
-        db.query(Outline)
-        .filter(Outline.novel_id == novel_id)
-        .order_by(Outline.chapter_end.desc())
-        .limit(2)
-        .all()
-    )
+    # Draft polishing must not inherit unrelated future plot beats from stored outlines.
+    outlines = []
+    if normalized_mode == "continue":
+        outlines = (
+            db.query(Outline)
+            .filter(Outline.novel_id == novel_id)
+            .order_by(Outline.chapter_end.desc())
+            .limit(2)
+            .all()
+        )
 
     recent_content = "\n\n".join(
         format_chapter_heading_for_prompt(
@@ -310,11 +340,33 @@ async def _build_continuation_prompt(
         combined_context += lorebook_context
 
     user_instruction = ""
-    if prompt and prompt.strip():
+    if normalized_mode == "continue" and prompt and prompt.strip():
         user_instruction = f"\n<user_instruction>\n{prompt.strip()}\n</user_instruction>\n"
         logger.info(f"User instruction provided for novel {novel_id}: {prompt[:50]}...")
 
     constraints_section = (narrative_constraints or "").strip()
+
+    if normalized_mode == "polish":
+        generation_prompt = get_prompt(PromptKey.DRAFT_POLISH, locale=prompt_locale).format(
+            title=novel.title,
+            next_chapter_reference=next_chapter_reference,
+            world_context=combined_context,
+            narrative_constraints=f"\n{constraints_section}\n" if constraints_section else "",
+            recent_content=recent_content,
+            draft=(prompt or "").strip(),
+        )
+        return generation_prompt, effective_max_tokens, {
+            "next_chapter": next_chapter,
+            "next_chapter_reference": next_chapter_reference,
+            "novel_language": getattr(novel, "language", None),
+            "generation_mode": normalized_mode,
+            "trim_target_chars": target_chars,
+            "system_prompt": _build_system_prompt(
+                length_guidance,
+                prompt_locale=prompt_locale,
+                generation_mode=normalized_mode,
+            ),
+        }
 
     generation_prompt = get_prompt(PromptKey.CONTINUATION, locale=prompt_locale).format(
         title=novel.title,
@@ -347,7 +399,13 @@ async def _build_continuation_prompt(
         "next_chapter": next_chapter,
         "next_chapter_reference": next_chapter_reference,
         "novel_language": getattr(novel, "language", None),
-        "system_prompt": _build_system_prompt(length_guidance, prompt_locale=prompt_locale),
+        "generation_mode": normalized_mode,
+        "trim_target_chars": target_chars,
+        "system_prompt": _build_system_prompt(
+            length_guidance,
+            prompt_locale=prompt_locale,
+            generation_mode=normalized_mode,
+        ),
     }
 
 
@@ -367,6 +425,7 @@ async def continue_novel(
     llm_config: dict | None = None,
     temperature: float | None = None,
     user_id: int | None = None,
+    generation_mode: str = "continue",
 ) -> List[Continuation]:
     """
     Generate continuation for a novel.
@@ -383,6 +442,7 @@ async def continue_novel(
         world_context: Injected WorldModel context (already visibility-filtered)
         narrative_constraints: Extracted narrative constraints from WorldSystem (injected as dedicated prompt section)
         world_debug_summary: Optional debug summary (used for logging/traceability)
+        generation_mode: Continue from context or polish the supplied draft
 
     Returns:
         List of generated Continuation objects
@@ -399,10 +459,12 @@ async def continue_novel(
         world_context=world_context,
         narrative_constraints=narrative_constraints,
         world_debug_summary=world_debug_summary,
+        generation_mode=generation_mode,
     )
     next_chapter = build_info["next_chapter"]
     novel_language = build_info.get("novel_language")
     system_prompt = build_info["system_prompt"]
+    trim_target_chars = build_info.get("trim_target_chars")
 
     # Generate continuations
     continuations = []
@@ -422,8 +484,8 @@ async def continue_novel(
 
         content = _sanitize_continuation_content(content)
 
-        if target_chars:
-            content = _trim_to_target_chars(content, target_chars, language=novel_language)
+        if trim_target_chars:
+            content = _trim_to_target_chars(content, trim_target_chars, language=novel_language)
 
         continuation = Continuation(
             novel_id=novel_id,
@@ -456,6 +518,7 @@ async def continue_novel_stream(
     request_id: str | None = None,
     temperature: float | None = None,
     user_id: int | None = None,
+    generation_mode: str = "continue",
 ) -> AsyncGenerator[dict, None]:
     """Yield NDJSON events for streaming continuation generation."""
     generation_prompt, effective_max_tokens, build_info = await _build_continuation_prompt(
@@ -470,10 +533,12 @@ async def continue_novel_stream(
         world_context=world_context,
         narrative_constraints=narrative_constraints,
         world_debug_summary=world_debug_summary,
+        generation_mode=generation_mode,
     )
     next_chapter = build_info["next_chapter"]
     novel_language = build_info.get("novel_language")
     system_prompt = build_info["system_prompt"]
+    trim_target_chars = build_info.get("trim_target_chars")
     llm_kwargs = llm_config or {}
     if temperature is not None:
         llm_kwargs["temperature"] = temperature
@@ -517,8 +582,8 @@ async def continue_novel_stream(
         yield _error_event(code="llm_stream_failed", message="续写生成失败，请重试", message_key="continuation.error.llm_stream_failed", variant=0)
     else:
         full_content = _sanitize_continuation_content(full_content)
-        if target_chars:
-            full_content = _trim_to_target_chars(full_content, target_chars, language=novel_language)
+        if trim_target_chars:
+            full_content = _trim_to_target_chars(full_content, trim_target_chars, language=novel_language)
 
         continuation = Continuation(
             novel_id=novel_id,
@@ -565,8 +630,8 @@ async def continue_novel_stream(
                 )
 
                 content = _sanitize_continuation_content(content)
-                if target_chars:
-                    content = _trim_to_target_chars(content, target_chars, language=novel_language)
+                if trim_target_chars:
+                    content = _trim_to_target_chars(content, trim_target_chars, language=novel_language)
                 return {"variant": variant_idx, "ok": True, "content": content}
             except Exception:
                 logger.exception(

@@ -201,7 +201,7 @@ export function useNovelCopilotSessionsState({
     setIsOpen(true)
     prefetchBackendSession(localId)
     return localId
-  }, [commitSessions, novelId, normalizedInteractionLocale, prefetchBackendSession])
+  }, [commitSessions, entrypoint, novelId, normalizedInteractionLocale, prefetchBackendSession])
 
   const focusSession = useCallback((sessionId: string) => {
     setFocusedSessionId(sessionId)

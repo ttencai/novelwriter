@@ -494,7 +494,13 @@ class PreferencesRequest(BaseModel):
     preferences: dict
 
 
-ALLOWED_PREFERENCE_KEYS = {"num_versions", "temperature", "context_chapters", "target_chars"}
+ALLOWED_PREFERENCE_KEYS = {
+    "num_versions",
+    "temperature",
+    "context_chapters",
+    "target_chars",
+    "continuation_mode",
+}
 
 
 @router.patch("/preferences", response_model=UserResponse)
@@ -509,6 +515,9 @@ def update_preferences(
         raw_context_chapters = filtered["context_chapters"]
         if isinstance(raw_context_chapters, int):
             filtered["context_chapters"] = resolve_context_chapters(raw_context_chapters)
+    # Persist only modes supported by both the setup page and generation API.
+    if filtered.get("continuation_mode") not in {None, "continue", "polish"}:
+        filtered.pop("continuation_mode", None)
     existing = current_user.preferences or {}
     existing.update(filtered)
     current_user.preferences = existing

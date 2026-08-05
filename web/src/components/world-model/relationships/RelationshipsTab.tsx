@@ -8,6 +8,7 @@ import { RelationshipInspector } from './RelationshipInspector'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { BottomSheet } from '@/components/world-model/shared/BottomSheet'
+import { LABELS } from '@/constants/labels'
 import type { UpdateRelationshipRequest, WorldEntity, WorldRelationship } from '@/types/api'
 
 function RelationshipsGraphSection({
@@ -80,7 +81,7 @@ export function RelationshipsTab({
   creating?: boolean
   onCreatingChange?: (open: boolean) => void
 }) {
-  const { t } = useUiLocale()
+  const { locale, t } = useUiLocale()
   const { data: relationships = [] } = useWorldRelationships(
     novelId,
     selectedEntityId !== null ? { entity_id: selectedEntityId } : undefined,
@@ -209,7 +210,7 @@ export function RelationshipsTab({
                 >
                   <div className="flex items-center gap-2">
                     <div className="font-medium text-foreground truncate flex-1">{e.name}</div>
-                    <div className="text-xs text-muted-foreground shrink-0">{e.entity_type}</div>
+                    <div className="text-xs text-muted-foreground shrink-0">{LABELS.ENTITY_TYPE_LABEL(e.entity_type, locale)}</div>
                     {newTargetId === e.id ? (
                       <div className="text-xs text-[hsl(var(--color-accent))] shrink-0">✓</div>
                     ) : null}

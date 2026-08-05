@@ -14,6 +14,14 @@ from sqlalchemy.orm import Session
 
 from app.core.copilot.messages import CopilotTextKey, get_copilot_text
 from app.core.copilot.scope import EvidenceItem, ScopeSnapshot
+from app.core.world.character_attributes import (
+    MAX_AUTO_EXTENSION_ATTRIBUTES,
+    MAX_AUTO_CHARACTER_ATTRIBUTES,
+    canonicalize_character_attribute_key,
+    count_extension_character_attributes,
+    is_core_character_attribute,
+    is_history_character_attribute,
+)
 from app.models import CopilotRun, WorldEntity
 
 logger = logging.getLogger(__name__)
@@ -70,6 +78,20 @@ def _normalize_entity_name_key(name: str | None) -> str:
     return (name or "").strip().casefold()
 
 
+def _get_catalog_entities(snapshot: ScopeSnapshot) -> list[WorldEntity]:
+    """Return the full collision-check catalog when available."""
+
+    return snapshot.entity_catalog or snapshot.entities
+
+
+def _find_entity_by_id(entity_id: int | None, snapshot: ScopeSnapshot) -> WorldEntity | None:
+    """Resolve an entity without widening the model-facing scope."""
+
+    if entity_id is None:
+        return None
+    return snapshot.entities_by_id.get(entity_id) or snapshot.entity_catalog_by_id.get(entity_id)
+
+
 def _find_existing_entity_by_name_or_alias(
     name: str | None,
     snapshot: ScopeSnapshot,
@@ -78,19 +100,22 @@ def _find_existing_entity_by_name_or_alias(
     if not key:
         return None
 
-    matches: list[WorldEntity] = []
-    seen_ids: set[int] = set()
-    for entity in snapshot.entities:
-        candidate_keys = [_normalize_entity_name_key(entity.name)]
-        candidate_keys.extend(_normalize_entity_name_key(alias) for alias in (entity.aliases or []))
-        if key not in candidate_keys:
-            continue
-        if entity.id in seen_ids:
-            continue
-        seen_ids.add(entity.id)
-        matches.append(entity)
+    entities = _get_catalog_entities(snapshot)
+    canonical_matches = [
+        entity for entity in entities
+        if _normalize_entity_name_key(entity.name) == key
+    ]
+    if len(canonical_matches) == 1:
+        return canonical_matches[0]
 
-    return matches[0] if len(matches) == 1 else None
+    alias_matches = [
+        entity for entity in entities
+        if key in {
+            _normalize_entity_name_key(alias)
+            for alias in (entity.aliases or [])
+        }
+    ]
+    return alias_matches[0] if len(alias_matches) == 1 else None
 
 
 def _build_entity_suggestion_candidates(
@@ -133,7 +158,7 @@ def _expand_relationship_entity_dependencies(
             delta = raw.get("delta") or {}
             for endpoint in ("source", "target"):
                 endpoint_id = delta.get(f"{endpoint}_id")
-                if isinstance(endpoint_id, int) and endpoint_id in snapshot.entities_by_id:
+                if isinstance(endpoint_id, int) and _find_entity_by_id(endpoint_id, snapshot) is not None:
                     continue
 
                 endpoint_name = str(delta.get(f"{endpoint}_name") or "").strip()
@@ -287,23 +312,55 @@ def _compile_one(
                 CopilotTextKey.SUGGESTION_REASON_DRAFT_CREATE_DISALLOWED,
             )
         else:
-            target_id = None
-            target_label = (
-                delta.get("name", "")
-                or delta.get("label", "")
-                or _build_new_resource_label(target_resource, interaction_locale)
+            existing_entity = (
+                _find_existing_entity_by_name_or_alias(delta.get("name"), snapshot)
+                if kind == "create_entity" and target_resource == "entity"
+                else None
             )
-            apply_action = _build_create_action(kind, delta, target_resource, snapshot, entity_candidates)
-            if apply_action is None:
-                actionable = False
-                non_actionable_reason = _build_non_actionable_create_reason(
+            if existing_entity is not None:
+                # 模型可能因局部工作集看不到全书角色；此时改为更新，避免重复创建。
+                kind = "update_entity"
+                target_id = existing_entity.id
+                target_label = existing_entity.name
+                delta = dict(delta)
+                delta.pop("name", None)
+                title = _suggestion_text(
+                    interaction_locale,
+                    CopilotTextKey.SUGGESTION_EXISTING_ENTITY_UPDATE_TITLE,
+                    entity_name=existing_entity.name,
+                )
+                apply_action = _build_update_action(
                     kind,
                     delta,
                     target_resource,
+                    target_id,
                     snapshot,
-                    entity_candidates,
-                    interaction_locale,
+                    mode,
                 )
+                if apply_action is None:
+                    actionable = False
+                    non_actionable_reason = _suggestion_text(
+                        interaction_locale,
+                        CopilotTextKey.SUGGESTION_REASON_CANNOT_APPLY_DIRECT,
+                    )
+            else:
+                target_id = None
+                target_label = (
+                    delta.get("name", "")
+                    or delta.get("label", "")
+                    or _build_new_resource_label(target_resource, interaction_locale)
+                )
+                apply_action = _build_create_action(kind, delta, target_resource, snapshot, entity_candidates)
+                if apply_action is None:
+                    actionable = False
+                    non_actionable_reason = _build_non_actionable_create_reason(
+                        kind,
+                        delta,
+                        target_resource,
+                        snapshot,
+                        entity_candidates,
+                        interaction_locale,
+                    )
     else:
         actionable = False
         target_label = str(target_id or "?")
@@ -459,14 +516,41 @@ def _compile_attribute_actions(
 ) -> list[dict[str, Any]]:
     if not raw_attrs:
         return []
+    entity = snapshot.entities_by_id.get(entity_id)
+    is_character = bool(
+        entity and (entity.entity_type or "").strip().casefold() in {"character", "角色", "人物"}
+    )
     existing_attrs = snapshot.attributes_by_entity.get(entity_id, [])
-    existing_by_key = {attr.key: attr for attr in existing_attrs}
+    existing_by_key = {
+        canonicalize_character_attribute_key(attr.key) if is_character else attr.key: attr
+        for attr in existing_attrs
+    }
+    extension_count = count_extension_character_attributes(existing_by_key) if is_character else 0
+    active_count = sum(
+        1 for key in existing_by_key
+        if not is_history_character_attribute(key)
+    ) if is_character else 0
+    seen_keys: set[str] = set()
     actions: list[dict[str, Any]] = []
     for raw_attr in raw_attrs:
-        key = raw_attr.get("key")
+        key = str(raw_attr.get("key") or "").strip()
         surface = raw_attr.get("surface")
         if not key or not surface:
             continue
+        if is_character:
+            key = canonicalize_character_attribute_key(key)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            if not is_core_character_attribute(key) and not is_history_character_attribute(key):
+                if key not in existing_by_key and extension_count >= MAX_AUTO_EXTENSION_ATTRIBUTES:
+                    continue
+                if key not in existing_by_key:
+                    extension_count += 1
+            if key not in existing_by_key and not is_history_character_attribute(key):
+                if active_count >= MAX_AUTO_CHARACTER_ATTRIBUTES:
+                    continue
+                active_count += 1
         if key in existing_by_key:
             attr = existing_by_key[key]
             if attr.surface != surface:
@@ -492,8 +576,8 @@ def _resolve_relationship_endpoint_reference(
     snapshot: ScopeSnapshot,
     entity_candidates: dict[str, dict[str, Any]],
 ) -> dict[str, Any] | None:
-    if isinstance(endpoint_id, int) and endpoint_id in snapshot.entities_by_id:
-        entity = snapshot.entities_by_id[endpoint_id]
+    entity = _find_entity_by_id(endpoint_id if isinstance(endpoint_id, int) else None, snapshot)
+    if entity is not None:
         return {"kind": "existing", "entity_id": entity.id, "label": entity.name}
 
     name = str(endpoint_name or "").strip()
@@ -525,9 +609,8 @@ def _build_create_action(
         name = delta.get("name")
         if not name:
             return None
-        for entity in snapshot.entities:
-            if entity.name == name:
-                return None
+        if _find_existing_entity_by_name_or_alias(name, snapshot) is not None:
+            return None
         data: dict[str, Any] = {"name": name, "entity_type": delta.get("entity_type", "Other")}
         if delta.get("description"):
             data["description"] = delta["description"]
@@ -536,10 +619,32 @@ def _build_create_action(
         action: dict[str, Any] = {"type": "create_entity", "data": data}
         attrs = delta.get("attributes", [])
         if attrs:
-            action["deferred_attribute_actions"] = [
-                {"type": "create_attribute", "data": {"key": attr["key"], "surface": attr["surface"]}}
-                for attr in attrs if attr.get("key") and attr.get("surface")
-            ]
+            is_character = str(data["entity_type"]).strip().casefold() in {"character", "角色", "人物"}
+            deferred_actions: list[dict[str, Any]] = []
+            extension_count = 0
+            active_count = 0
+            seen_keys: set[str] = set()
+            for attr in attrs:
+                key = str(attr.get("key") or "").strip()
+                surface = attr.get("surface")
+                if not key or not surface:
+                    continue
+                if is_character:
+                    key = canonicalize_character_attribute_key(key)
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+                    if not is_core_character_attribute(key) and not is_history_character_attribute(key):
+                        if extension_count >= MAX_AUTO_EXTENSION_ATTRIBUTES:
+                            continue
+                        extension_count += 1
+                    if not is_history_character_attribute(key):
+                        if active_count >= MAX_AUTO_CHARACTER_ATTRIBUTES:
+                            continue
+                        active_count += 1
+                deferred_actions.append({"type": "create_attribute", "data": {"key": key, "surface": surface}})
+            if deferred_actions:
+                action["deferred_attribute_actions"] = deferred_actions
         return action
 
     if target_resource == "relationship":
@@ -692,7 +797,7 @@ def _build_field_deltas(
     deltas: list[dict[str, Any]] = []
     current: dict[str, Any] = {}
     if target_id and target_resource == "entity":
-        entity = snapshot.entities_by_id.get(target_id)
+        entity = _find_entity_by_id(target_id, snapshot)
         if entity:
             current = {
                 "name": entity.name,

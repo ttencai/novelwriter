@@ -22,6 +22,7 @@ export function StudioNavigationRail({
   latestChapterReference,
   onContinuation,
   onOpenAtlas,
+  hasAtlasUpdates = false,
   activeStage,
 }: {
   novelTitle: string
@@ -36,6 +37,7 @@ export function StudioNavigationRail({
   latestChapterReference: string | null
   onContinuation: () => void
   onOpenAtlas: () => void
+  hasAtlasUpdates?: boolean
   activeStage: NovelShellStage | null
 }) {
   const { t } = useUiLocale()
@@ -70,6 +72,7 @@ export function StudioNavigationRail({
           latestChapterReference={latestChapterReference}
           onContinuation={onContinuation}
           onOpenAtlas={onOpenAtlas}
+          hasAtlasUpdates={hasAtlasUpdates}
         />
 
         {hasSearch ? (

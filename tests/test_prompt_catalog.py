@@ -131,6 +131,25 @@ def test_continuation_template_has_expected_placeholders() -> None:
     assert "42" in formatted
 
 
+@pytest.mark.parametrize("locale", ["zh", "en", "ja", "ko"])
+def test_draft_polish_templates_resolve_and_format(locale: str) -> None:
+    system_prompt = get_prompt(PromptKey.DRAFT_POLISH_SYSTEM, locale=locale)
+    template = get_prompt(PromptKey.DRAFT_POLISH, locale=locale)
+
+    formatted = template.format(
+        title="Test Novel",
+        next_chapter_reference="Chapter 42",
+        world_context="",
+        narrative_constraints="",
+        recent_content="reference prose",
+        draft="draft prose",
+    )
+
+    assert system_prompt.strip()
+    assert "reference prose" in formatted
+    assert "draft prose" in formatted
+
+
 def test_outline_template_has_expected_placeholders() -> None:
     tpl = get_prompt(PromptKey.OUTLINE)
     formatted = tpl.format(start=1, end=10, content="chapter content")

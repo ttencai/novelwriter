@@ -1,4 +1,6 @@
 """Tests for Chapter CRUD endpoints (Phase 3)."""
+from unittest.mock import AsyncMock
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -99,6 +101,38 @@ class TestCreateChapter:
 
         db.refresh(novel)
         assert novel.total_chapters == 3
+
+    def test_create_chapter_does_not_detect_changes_by_default(self, client, novel, monkeypatch):
+        from app.api import novels
+
+        detector = AsyncMock()
+        monkeypatch.setattr(novels, "run_entity_change_detection_background", detector)
+
+        resp = client.post(
+            f"/api/novels/{novel.id}/chapters",
+            json={"chapter_number": 3, "content": "普通手动章节"},
+        )
+
+        assert resp.status_code == 201
+        detector.assert_not_awaited()
+
+    def test_create_chapter_detects_changes_when_requested(self, client, novel, monkeypatch):
+        from app.api import novels
+
+        detector = AsyncMock()
+        monkeypatch.setattr(novels, "run_entity_change_detection_background", detector)
+
+        resp = client.post(
+            f"/api/novels/{novel.id}/chapters",
+            json={
+                "chapter_number": 3,
+                "content": "采纳续写正文",
+                "detect_entity_changes": True,
+            },
+        )
+
+        assert resp.status_code == 201
+        detector.assert_awaited_once()
 
     def test_create_chapter_auto_number_fills_gap_after_delete(self, client, db, novel):
         # Arrange: chapters 1,2,3 exist.

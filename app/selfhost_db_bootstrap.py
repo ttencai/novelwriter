@@ -27,6 +27,7 @@ from app.models import (  # noqa: F401 - register models with Base.metadata
     UserEvent,
     WorldEntity,
     WorldEntityAttribute,
+    WorldEntityChangeProposal,
     WorldRelationship,
     WorldSystem,
 )
@@ -37,6 +38,7 @@ _HEAD_REVISION = "head"
 _PRE_NOVEL_LANGUAGE_REVISION = "022"
 _PRE_DERIVED_ASSET_JOB_REVISION = "029"
 _PRE_CHAPTER_SOURCE_METADATA_REVISION = "030"
+_PRE_ENTITY_CHANGE_REVISION = "032"
 _CORE_TABLES = {"novels", "chapters"}
 _LEGACY_TABLES = {
     "narrative_events",
@@ -87,14 +89,33 @@ _REQUIRED_SCHEMA_COLUMNS: dict[str, set[str]] = {
         "started_at",
         "finished_at",
     },
+    "world_entity_change_proposals": {
+        "novel_id",
+        "chapter_id",
+        "chapter_number",
+        "entity_id",
+        "entity_name",
+        "summary",
+        "evidence",
+        "delta",
+        "fingerprint",
+        "status",
+    },
     "user_events": {"user_id", "event", "created_at"},
 }
 _UNVERSIONED_AUTO_UPGRADE_BASELINES: tuple[tuple[str, dict[str, set[str]]], ...] = (
+    (
+        _PRE_ENTITY_CHANGE_REVISION,
+        {
+            "world_entity_change_proposals": _REQUIRED_SCHEMA_COLUMNS["world_entity_change_proposals"],
+        },
+    ),
     (
         _PRE_CHAPTER_SOURCE_METADATA_REVISION,
         {
             "auth_identities": _REQUIRED_SCHEMA_COLUMNS["auth_identities"],
             "chapters": _REQUIRED_SCHEMA_COLUMNS["chapters"],
+            "world_entity_change_proposals": _REQUIRED_SCHEMA_COLUMNS["world_entity_change_proposals"],
         },
     ),
     (
@@ -103,6 +124,7 @@ _UNVERSIONED_AUTO_UPGRADE_BASELINES: tuple[tuple[str, dict[str, set[str]]], ...]
             "auth_identities": _REQUIRED_SCHEMA_COLUMNS["auth_identities"],
             "chapters": _REQUIRED_SCHEMA_COLUMNS["chapters"],
             "derived_asset_jobs": _REQUIRED_SCHEMA_COLUMNS["derived_asset_jobs"],
+            "world_entity_change_proposals": _REQUIRED_SCHEMA_COLUMNS["world_entity_change_proposals"],
         },
     ),
     (
@@ -118,6 +140,7 @@ _UNVERSIONED_AUTO_UPGRADE_BASELINES: tuple[tuple[str, dict[str, set[str]]], ...]
             },
             "chapters": _REQUIRED_SCHEMA_COLUMNS["chapters"],
             "derived_asset_jobs": _REQUIRED_SCHEMA_COLUMNS["derived_asset_jobs"],
+            "world_entity_change_proposals": _REQUIRED_SCHEMA_COLUMNS["world_entity_change_proposals"],
         },
     ),
 )

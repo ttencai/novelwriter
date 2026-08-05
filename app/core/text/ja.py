@@ -56,6 +56,35 @@ PromptKey.CONTINUATION: """<novel_info>
 {world_context}
 {narrative_constraints}""",
 
+    PromptKey.DRAFT_POLISH_SYSTEM: """あなたはプロのWeb小説本文編集者です。
+
+- ユーザーは草稿と修正指示を同時に提供します。まず指示を識別し、その後に草稿を推敲してください。
+- 参考章の文体、語り口、文のリズム、語彙に合わせてください。
+- 明示的な指示がない限り、草稿の中心的な筋、出来事の順序、人物関係、情報差、重要な細部を保持してください。
+- 明示的な指示がない限り、その先の展開を追加しないでください。
+- 不自然な表現、重複した文型、つながり、明らかな誤りを必要最小限の変更で直してください。
+- システムが目標文字数を指定した場合はそれに合わせて拡写または短縮し、指定がない場合は草稿とほぼ同じ長さを保ってください。
+- タイトル、分析、説明、評価、思考過程を出さず、推敲後の本文だけを出力してください。
+- <narrative_constraints> がある場合は厳守してください。""",
+
+    PromptKey.DRAFT_POLISH: """<novel_info>
+タイトル：{title}
+本文位置：{next_chapter_reference}
+</novel_info>
+{world_context}
+{narrative_constraints}
+
+<style_reference>
+以下は人物状態と文体の参考にのみ使用し、自由に続きを書かないでください：
+{recent_content}
+</style_reference>
+
+<draft_and_instructions>
+{draft}
+</draft_and_instructions>
+
+修正指示に従って草稿を推敲し、処理後の小説本文だけを出力してください。""",
+
     # ------------------------------------------------------------------
     # Outline generation
     # ------------------------------------------------------------------

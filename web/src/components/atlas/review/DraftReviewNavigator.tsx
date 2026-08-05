@@ -10,6 +10,7 @@ import type { DraftReviewKind } from '@/components/atlas/review/DraftReviewSumma
 import { useNovelCopilot } from '@/components/novel-copilot/NovelCopilotContext'
 import { buildDraftCleanupCopilotLaunchArgs } from '@/components/novel-copilot/novelCopilotLauncher'
 import { Sparkles } from 'lucide-react'
+import { LABELS } from '@/constants/labels'
 
 export function DraftReviewNavigator({
   novelId,
@@ -30,7 +31,7 @@ export function DraftReviewNavigator({
   onSelectItem: (kind: DraftReviewKind, id: number) => void
   className?: string
 }) {
-  const { t } = useUiLocale()
+  const { locale, t } = useUiLocale()
   const { data: allEntities = [] } = useWorldEntities(novelId)
   const entityMap = useMemo(() => new Map(allEntities.map((e) => [e.id, e])), [allEntities])
   const copilot = useNovelCopilot()
@@ -54,7 +55,7 @@ export function DraftReviewNavigator({
         .map((e) => ({
           id: e.id,
           title: e.name || '\u00A0',
-          meta: e.entity_type,
+          meta: LABELS.ENTITY_TYPE_LABEL(e.entity_type, locale),
         }))
     }
 
@@ -87,9 +88,9 @@ export function DraftReviewNavigator({
       .map((s) => ({
         id: s.id,
         title: s.name || '\u00A0',
-        meta: getSystemDisplayTypeLabel(s.display_type),
+        meta: getSystemDisplayTypeLabel(s.display_type, locale),
       }))
-  }, [draftEntities, draftRelationships, draftSystems, entityMap, kind, q])
+  }, [draftEntities, draftRelationships, draftSystems, entityMap, kind, locale, q])
 
   const totalCount = draftEntities.length + draftRelationships.length + draftSystems.length
 

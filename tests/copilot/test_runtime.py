@@ -711,12 +711,65 @@ class TestSuggestionCompilation:
         assert len(compiled) == 1
         assert compiled[0].preview["actionable"] is True
 
-    def test_create_blocked_by_name_collision(self, db, novel, entities):
+    def test_create_for_existing_entity_compiles_as_update(self, db, novel, entities):
         from app.core.copilot import compile_suggestions
         snapshot = self._make_snapshot(entities, [], [], db)
-        raw = [{"kind": "create_entity", "target_resource": "entity", "title": "重名", "summary": "x", "delta": {"name": "张三", "entity_type": "Character"}}]
+        raw = [{
+            "kind": "create_entity",
+            "target_resource": "entity",
+            "title": "新增张三",
+            "summary": "补充现有角色",
+            "delta": {
+                "name": "张三",
+                "entity_type": "Character",
+                "description": "更新后的主角描述",
+            },
+        }]
         compiled = compile_suggestions(raw, [], snapshot, "research", "whole_book")
-        assert compiled[0].preview["actionable"] is False
+        suggestion = compiled[0]
+        assert suggestion.kind == "update_entity"
+        assert suggestion.title == "修改「张三」"
+        assert suggestion.target["resource_id"] == entities[0].id
+        assert suggestion.preview["actionable"] is True
+        assert suggestion.apply_action == {
+            "type": "update_entity",
+            "entity_id": entities[0].id,
+            "data": {
+                "entity_type": "Character",
+                "description": "更新后的主角描述",
+            },
+        }
+
+    def test_create_for_entity_outside_focused_scope_uses_catalog_update(self, db, novel, entities):
+        from app.core.copilot import compile_suggestions
+
+        snapshot = self._make_snapshot([entities[0]], [], [], db)
+        # 完整目录不会进入模型工作集，只用于识别工作集外的已有角色。
+        snapshot.entity_catalog = list(entities)
+        snapshot.entity_catalog_by_id = {entity.id: entity for entity in entities}
+        raw = [{
+            "kind": "create_entity",
+            "target_resource": "entity",
+            "title": "新增李四",
+            "summary": "补充反派设定",
+            "delta": {
+                "name": "李四",
+                "entity_type": "Character",
+                "description": "更新后的反派描述",
+            },
+        }]
+
+        suggestion = compile_suggestions(raw, [], snapshot, "research", "current_entity")[0]
+
+        assert suggestion.kind == "update_entity"
+        assert suggestion.title == "修改「李四」"
+        assert suggestion.target["entity_id"] == entities[1].id
+        assert suggestion.apply_action["entity_id"] == entities[1].id
+        description_delta = next(
+            item for item in suggestion.preview["field_deltas"]
+            if item["field"] == "description"
+        )
+        assert description_delta["before"] == "反派"
 
     def test_attribute_suggestion_compiled_to_action(self, db, novel, entities, attributes):
         """Entity enrichment with attributes — the #1 workflow."""
@@ -737,6 +790,8 @@ class TestSuggestionCompilation:
         types = [a["type"] for a in attr_actions]
         assert "create_attribute" in types
         assert "update_attribute" in types
+        created = next(action for action in attr_actions if action["type"] == "create_attribute")
+        assert created["data"]["key"] == "阵营"
 
     def test_update_relationship_target_contains_graph_focus_and_highlight(self, db, novel, entities, relationships):
         from app.core.copilot import compile_suggestions
@@ -1073,6 +1128,55 @@ class TestApplyContract:
         assert new_entity is not None
         assert new_entity.origin == "manual"
         assert new_entity.status == "confirmed"
+
+    def test_apply_old_create_suggestion_merges_into_existing_entity(self, client, db, novel, entities):
+        session, run = self._create_completed_run(db, novel, entities)
+        suggestions = list(run.suggestions_json or [])
+        suggestions[1] = {
+            **suggestions[1],
+            "title": "新增张三",
+            "target": {
+                "resource": "entity",
+                "resource_id": None,
+                "label": "张三",
+                "tab": "entities",
+            },
+            "apply": {
+                "type": "create_entity",
+                "data": {
+                    "name": "张三",
+                    "entity_type": "Character",
+                    "description": "合并后的主角描述",
+                },
+                "deferred_attribute_actions": [
+                    {
+                        "type": "create_attribute",
+                        "data": {"key": "身份", "surface": "宗门首席弟子"},
+                    },
+                ],
+            },
+        }
+        run.suggestions_json = suggestions
+        db.commit()
+
+        response = client.post(
+            f"/api/novels/{novel.id}/world/copilot/sessions/{session.session_id}/runs/{run.run_id}/apply",
+            json={"suggestion_ids": ["sg_create"]},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["results"][0]["success"] is True
+        matching_entities = db.query(WorldEntity).filter(
+            WorldEntity.novel_id == novel.id,
+            WorldEntity.name == "张三",
+        ).all()
+        assert len(matching_entities) == 1
+        assert matching_entities[0].description == "合并后的主角描述"
+        merged_attribute = db.query(WorldEntityAttribute).filter(
+            WorldEntityAttribute.entity_id == entities[0].id,
+            WorldEntityAttribute.key == "身份",
+        ).one()
+        assert merged_attribute.surface == "宗门首席弟子"
 
     def test_apply_create_rolls_back_when_deferred_attribute_write_fails(self, client, db, novel, entities):
         session = CopilotSession(
@@ -1898,48 +2002,6 @@ class TestPromptContracts:
         assert run.answer == "直接回答"
 
     @pytest.mark.asyncio
-    async def test_execute_copilot_run_assistant_chat_skips_story_preload_and_suggestion_compile(self, db, novel, monkeypatch):
-        pytest.xfail("legacy assistant-chat regression replaced by clean coverage below")
-        import app.database as db_mod
-        import app.core.copilot as copilot_mod
-
-        from app.core.copilot import create_run, execute_copilot_run, open_or_reuse_session
-
-        session, _ = open_or_reuse_session(db, novel.id, 1, "research", "whole_book", None, "zh", "assistant_chat", "AI 瀵硅瘽")
-        prior_run = create_run(db, session, 1, "鍏堣嚜鎴戜粙缁嶄竴涓?")
-        prior_run.status = "completed"
-        prior_run.answer = "鎴戞槸浣犵殑閫氱敤 AI 鍔╂墜銆?"
-        db.commit()
-        run = create_run(db, session, 1, "assistant chat should answer directly")
-
-        captured: dict[str, object] = {}
-
-        async def fake_assistant_chat_tool_loop(
-            _db_factory, _novel_id, _session_data, prompt, *_args, prior_messages=None, **_kwargs,
-        ):
-            return {"answer": "鐩存帴鍥炵瓟", "suggestions": [{"kind": "update_entity"}]}, []
-
-        def broken_gather_evidence(*_args, **_kwargs):
-            raise AssertionError("assistant_chat should not preload story evidence")
-
-        def broken_compile_suggestions(*_args, **_kwargs):
-            raise AssertionError("assistant_chat should not compile research suggestions")
-
-        monkeypatch.setattr(db_mod, "SessionLocal", TestingSessionLocal)
-        monkeypatch.setattr(copilot_mod, "gather_evidence", broken_gather_evidence)
-        monkeypatch.setattr(copilot_mod, "_run_one_shot", fake_run_one_shot)
-        monkeypatch.setattr(copilot_mod, "compile_suggestions", broken_compile_suggestions)
-
-        await execute_copilot_run(run.run_id, novel.id, 1, llm_config={"billing_source_hint": "selfhost"})
-
-        db.expire_all()
-        run = db.query(CopilotRun).filter(CopilotRun.run_id == run.run_id).one()
-        assert run.status == "completed"
-        assert run.answer == "鐩存帴鍥炵瓟"
-        assert run.evidence_json == []
-        assert run.suggestions_json == []
-
-    @pytest.mark.asyncio
     async def test_execute_copilot_run_uses_run_context_snapshot_after_session_retarget(self, db, novel, entities, monkeypatch):
         import app.database as db_mod
         import app.core.copilot as copilot_mod
@@ -2001,6 +2063,12 @@ class TestPromptContracts:
 
 
 class TestScopeAndPrompt:
+    def test_workspace_query_detection_avoids_unrelated_ordinal_questions(self):
+        from app.core.copilot import prompt_may_reference_workspace
+
+        assert prompt_may_reference_workspace("第一步应该怎么做") is False
+        assert prompt_may_reference_workspace("140-143章是否连续") is True
+
     def test_whole_book_loads_all(self, db, novel, entities, relationships, systems, chapters):
         from app.core.copilot import load_scope_snapshot
         snapshot = load_scope_snapshot(db, novel, "research", "whole_book", None)
@@ -2008,12 +2076,67 @@ class TestScopeAndPrompt:
         assert len(snapshot.relationships) >= 1
         assert len(snapshot.systems) >= 1
 
+    def test_explicit_chapter_range_loads_requested_chapters(self, db, novel, entities):
+        from app.core.copilot import gather_explicit_query_evidence, load_scope_snapshot
+
+        for number in range(140, 144):
+            db.add(Chapter(
+                novel_id=novel.id,
+                chapter_number=number,
+                title=f"第{number}章",
+                content=f"这是第{number}章正文，承接上一章并推进林野的调查。",
+            ))
+        db.commit()
+        snapshot = load_scope_snapshot(db, novel, "research", "whole_book", None)
+
+        evidence = gather_explicit_query_evidence(
+            db,
+            novel,
+            snapshot,
+            "帮我参考一下140-143章是否连续",
+        )
+
+        chapter_numbers = [
+            item.source_ref.get("chapter_number")
+            for item in evidence
+            if item.source_type == "chapter_excerpt"
+        ]
+        assert chapter_numbers == [140, 141, 142, 143]
+
+    def test_explicit_character_query_loads_world_rows_and_prose(self, db, novel, entities, relationships, chapters):
+        from app.core.copilot import gather_explicit_query_evidence, load_scope_snapshot
+
+        snapshot = load_scope_snapshot(db, novel, "research", "whole_book", None)
+        evidence = gather_explicit_query_evidence(db, novel, snapshot, "张三和李四是什么关系")
+
+        assert any(item.source_type == "world_entity" for item in evidence)
+        assert any(item.source_type == "world_relationship" for item in evidence)
+        assert any(item.source_type == "chapter_excerpt" for item in evidence)
+
     def test_current_entity_scopes_to_neighbors(self, db, novel, entities, relationships, chapters):
         from app.core.copilot import load_scope_snapshot
         snapshot = load_scope_snapshot(db, novel, "current_entity", "current_entity", {"entity_id": entities[0].id})
         ids = {e.id for e in snapshot.entities}
         assert entities[0].id in ids
         assert entities[1].id in ids  # relationship partner
+
+    def test_current_entity_prompt_renders_existing_attributes(self, db, novel, entities, attributes):
+        """Existing attributes must not collide with the prompt helper's template key."""
+        from app.core.copilot import build_copilot_system_prompt, derive_scenario, load_scope_snapshot
+
+        context = {"entity_id": entities[0].id, "tab": "entities", "surface": "atlas"}
+        snapshot = load_scope_snapshot(db, novel, "current_entity", "current_entity", context)
+
+        prompt = build_copilot_system_prompt(
+            snapshot,
+            [],
+            derive_scenario("current_entity", "current_entity", context),
+            "zh",
+            {"context_json": context, "display_title": entities[0].name},
+            "task_query",
+        )
+
+        assert "属性 境界: 金丹期" in prompt
 
     def test_relationship_current_tab_uses_focused_research_profile(self, db, novel, entities, relationships, systems):
         from app.core.copilot import load_scope_snapshot
@@ -2158,6 +2281,24 @@ class TestScopeAndPrompt:
 
         assert "不只包括人物" in prompt
         assert "势力、地点、组织、物件、概念" in prompt
+
+    def test_character_entity_prompt_checks_fixed_character_attributes(self, db, novel, entities):
+        from app.core.copilot import _build_tool_loop_system_prompt, derive_scenario, load_scope_snapshot
+
+        context = {"entity_id": entities[0].id}
+        snapshot = load_scope_snapshot(db, novel, "current_entity", "current_entity", context)
+        prompt = _build_tool_loop_system_prompt(
+            snapshot,
+            derive_scenario("current_entity", "current_entity", context),
+            "zh",
+            {"context_json": context, "display_title": entities[0].name},
+            "task_query",
+        )
+
+        assert "只能使用下列固定属性" in prompt
+        assert "角色有效属性总数最多12个" in prompt
+        assert "性格：跨场景稳定" in prompt
+        assert "一次性动作、临时情绪和时代背景不生成属性" in prompt
 
     def test_multilingual_prompt_preserves_canonical(self, db, novel, entities, chapters):
         from app.core.copilot import build_copilot_system_prompt, gather_evidence, load_scope_snapshot
@@ -2403,6 +2544,37 @@ class TestScopeAndPrompt:
             {"role": "assistant", "content": "你好，有什么想聊的？"},
             {"role": "user", "content": "请写一段肉番本子对白"},
         ]
+
+    @pytest.mark.asyncio
+    async def test_dedicated_assistant_chat_reads_explicit_chapter_query(self, db, novel, chapters, monkeypatch):
+        import app.database as db_mod
+        import app.core.copilot as copilot_mod
+
+        from app.core.copilot import create_run, execute_assistant_chat_run, open_or_reuse_session
+
+        session, _ = open_or_reuse_session(
+            db, novel.id, 1, "research", "whole_book", None, "zh", "assistant_chat", "AI Chat"
+        )
+        run = create_run(db, session, 1, "帮我检查第1-3章是否连续")
+        captured: dict[str, object] = {}
+
+        async def fake_chat_completion(messages, _llm_config, _user_id):
+            captured["messages"] = messages
+            return "章节连续性检查结果"
+
+        monkeypatch.setattr(db_mod, "SessionLocal", TestingSessionLocal)
+        monkeypatch.setattr(copilot_mod, "_call_chat_completions_llm", fake_chat_completion)
+
+        await execute_assistant_chat_run(run.run_id, novel.id, 1, llm_config={"billing_source_hint": "selfhost"})
+
+        db.expire_all()
+        saved = db.query(CopilotRun).filter(CopilotRun.run_id == run.run_id).one()
+        assert saved.status == "completed"
+        assert len(saved.evidence_json) == 3
+        system_prompt = captured["messages"][0]["content"]
+        assert "这是第1章的内容" in system_prompt
+        assert "这是第3章的内容" in system_prompt
+        assert saved.suggestions_json == []
 
     @pytest.mark.asyncio
     async def test_run_one_shot_uses_prior_messages(self, db, novel, monkeypatch):
@@ -2905,6 +3077,57 @@ class TestAgentLoop:
         assert workspace.tool_call_count >= 1
 
     @pytest.mark.asyncio
+    async def test_explicit_chapter_evidence_is_visible_on_first_tool_turn(self, db, novel, entities, chapters, mock_setup, monkeypatch):
+        from app.core.ai_client import ToolLLMResponse
+        from app.core.copilot import (
+            _run_tool_loop,
+            derive_scenario,
+            gather_explicit_query_evidence,
+            load_scope_snapshot,
+        )
+
+        session_data, _prompt, session, _run = mock_setup
+        prompt = "检查第1-3章是否连续"
+        snapshot = load_scope_snapshot(db, novel, session.mode, session.scope, session.context_json)
+        evidence = gather_explicit_query_evidence(db, novel, snapshot, prompt)
+        scenario = derive_scenario(session.mode, session.scope, session.context_json)
+        captured_messages: list[list[dict]] = []
+
+        async def mock_generate_with_tools(self_client, **kwargs):
+            captured_messages.append(kwargs.get("messages", []))
+            return ToolLLMResponse(
+                content='{"answer": "连续", "suggestions": []}',
+                tool_calls=[],
+                finish_reason="stop",
+            )
+
+        monkeypatch.setattr("app.core.ai_client.AIClient.generate_with_tools", mock_generate_with_tools)
+        monkeypatch.setattr("app.core.copilot.acquire_llm_slot", lambda: _noop_coro())
+        monkeypatch.setattr("app.core.copilot.release_llm_slot", lambda: None)
+
+        await _run_tool_loop(
+            lambda: db,
+            novel.id,
+            session_data,
+            prompt,
+            None,
+            1,
+            snapshot,
+            scenario,
+            evidence,
+            "task_query",
+        )
+
+        user_message = next(
+            message["content"]
+            for message in captured_messages[0]
+            if message.get("role") == "user"
+        )
+        assert "[Evidence explicitly requested by the user]" in user_message
+        assert "这是第1章的内容" in user_message
+        assert "这是第3章的内容" in user_message
+
+    @pytest.mark.asyncio
     async def test_executes_all_tool_calls_from_single_model_turn(self, db, novel, entities, chapters, mock_setup, monkeypatch):
         from app.core.copilot import _run_tool_loop
         from app.core.ai_client import ToolLLMResponse, ToolCall
@@ -3247,6 +3470,70 @@ class TestDegradation:
             for step in (run.trace_json or [])
         )
 
+        db.close = original_close
+
+    @pytest.mark.asyncio
+    async def test_transient_one_shot_failure_retries_once(self, db, novel, entities, chapters, mock_session_and_run, monkeypatch):
+        """A temporary provider failure should not immediately fail entity completion."""
+        session, run = mock_session_and_run
+        one_shot_calls = 0
+
+        async def mock_tool_loop(*args, **kwargs):
+            raise RuntimeError("tool loop failed")
+
+        async def mock_one_shot(snapshot, evidence, scenario, session_data, turn_intent, prompt, llm_config, user_id, **kwargs):
+            nonlocal one_shot_calls
+            one_shot_calls += 1
+            if one_shot_calls == 1:
+                raise RuntimeError("429 rate limit exceeded")
+            return {"answer": "retry succeeded", "suggestions": []}, evidence
+
+        monkeypatch.setattr("app.core.copilot._run_tool_loop", mock_tool_loop)
+        monkeypatch.setattr("app.core.copilot._run_one_shot", mock_one_shot)
+        monkeypatch.setattr("app.core.copilot.asyncio.sleep", lambda *_args, **_kwargs: _noop_coro())
+        monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+        original_close = db.close
+        monkeypatch.setattr(db, "close", lambda: None)
+
+        from app.core.copilot import execute_copilot_run
+        await execute_copilot_run(run.run_id, novel.id, 1, None)
+
+        db.refresh(run)
+        assert one_shot_calls == 2
+        assert run.status == "completed"
+        assert run.answer == "retry succeeded"
+        db.close = original_close
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_failure_records_specific_message(self, db, novel, entities, chapters, mock_session_and_run, monkeypatch):
+        """When retry also fails, keep a useful reason instead of a generic error."""
+        from app.core.ai_client import ToolCallUnsupportedError
+
+        session, run = mock_session_and_run
+        one_shot_calls = 0
+
+        async def mock_tool_loop(*args, **kwargs):
+            raise ToolCallUnsupportedError("tools not supported")
+
+        async def mock_one_shot(*args, **kwargs):
+            nonlocal one_shot_calls
+            one_shot_calls += 1
+            raise RuntimeError("429 rate limit exceeded")
+
+        monkeypatch.setattr("app.core.copilot._run_tool_loop", mock_tool_loop)
+        monkeypatch.setattr("app.core.copilot._run_one_shot", mock_one_shot)
+        monkeypatch.setattr("app.core.copilot.asyncio.sleep", lambda *_args, **_kwargs: _noop_coro())
+        monkeypatch.setattr("app.database.SessionLocal", lambda: db)
+        original_close = db.close
+        monkeypatch.setattr(db, "close", lambda: None)
+
+        from app.core.copilot import execute_copilot_run
+        await execute_copilot_run(run.run_id, novel.id, 1, None)
+
+        db.refresh(run)
+        assert one_shot_calls == 2
+        assert run.status == "error"
+        assert run.error == "模型服务当前请求较多，本轮未完成，请稍后重试。"
         db.close = original_close
 
     @pytest.mark.asyncio

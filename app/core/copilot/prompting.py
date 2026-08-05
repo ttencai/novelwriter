@@ -10,6 +10,11 @@ from string import Template
 from typing import Any
 
 from app.core.copilot.scope import EvidenceItem, ScopeSnapshot
+from app.core.world.character_attributes import (
+    CHARACTER_ATTRIBUTE_CONTENT_RULES,
+    CORE_CHARACTER_ATTRIBUTE_ORDER,
+    MAX_AUTO_CHARACTER_ATTRIBUTES,
+)
 from app.language import get_language_fallback_chain
 from app.models import WorldEntity, WorldRelationship, WorldSystem
 
@@ -794,15 +799,17 @@ def _prompt_map(locale: str | None, map_name: str, item_key: str, *, fallback_ke
     raise KeyError(f"Missing prompt map value {map_name}.{item_key}")
 
 
-def _prompt_text(locale: str | None, key: str, **params: object) -> str:
+def _prompt_text(locale: str | None, text_key: str, **params: object) -> str:
+    """Render localized prompt text without colliding with a template's ``key`` field."""
+
     for candidate in get_language_fallback_chain(locale, default="zh"):
         bundle = _PROMPT_LOCALE_REGISTRY.get(candidate)
         if not bundle:
             continue
-        template = bundle.get("texts", {}).get(key)
+        template = bundle.get("texts", {}).get(text_key)
         if template is not None:
             return str(template).format(**params)
-    raise KeyError(f"Missing prompt text {key}")
+    raise KeyError(f"Missing prompt text {text_key}")
 
 
 def _prompt_template(locale: str | None, key: str, **params: object) -> str:
@@ -1052,7 +1059,52 @@ def _build_runtime_instruction_text(
         focus_key,
         fallback_key="entity",
     )
-    return f"{profile_instr}\n{focus_instr}".strip()
+    character_instr = _build_character_attribute_instruction(
+        snapshot,
+        focus_key,
+        interaction_locale,
+    )
+    return "\n".join(
+        part for part in (profile_instr, focus_instr, character_instr) if part
+    ).strip()
+
+
+def _build_character_attribute_instruction(
+    snapshot: ScopeSnapshot,
+    focus_key: str,
+    interaction_locale: str,
+) -> str:
+    """要求人物补完使用统一属性名，而不只是事后归并模型输出。"""
+    if focus_key != "entity" or snapshot.focus_entity_id is None:
+        return ""
+
+    entity = snapshot.entities_by_id.get(snapshot.focus_entity_id)
+    if entity is None or (entity.entity_type or "").strip().casefold() not in {
+        "character",
+        "角色",
+        "人物",
+    }:
+        return ""
+
+    attribute_rules = "\n".join(
+        f"- {key}：{CHARACTER_ATTRIBUTE_CONTENT_RULES[key]}"
+        for key in CORE_CHARACTER_ATTRIBUTE_ORDER
+    )
+    if interaction_locale == "en":
+        return (
+            "The focused entity is a character. Use only the canonical fields below and create no more than "
+            f"{MAX_AUTO_CHARACTER_ATTRIBUTES} active attributes in total. Keep a field only when it directly helps "
+            "continuation or polishing, has clear prose evidence, and does not duplicate the description, relationships, "
+            "or another field. Current fields replace old values; do not preserve one-off actions or temporary emotions.\n"
+            f"{attribute_rules}"
+        )
+
+    return (
+        "当前焦点是人物。自动补完只能使用下列固定属性，角色有效属性总数最多"
+        f"{MAX_AUTO_CHARACTER_ATTRIBUTES}个。仅保留对续写或润色有直接作用、正文依据明确且不与描述、"
+        "关系数据或其他属性重复的内容。当前类属性直接替换旧值；一次性动作、临时情绪和时代背景不生成属性。\n"
+        f"{attribute_rules}"
+    )
 
 
 def _format_entity_rows_for_prompt(

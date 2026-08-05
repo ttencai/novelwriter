@@ -12,6 +12,7 @@ import { NovelAtlasPage } from '@/pages/NovelAtlasPage'
 
 const mockUseWorldEntities = vi.fn()
 const mockUseWorldSystems = vi.fn()
+const mockUsePendingEntityChanges = vi.fn()
 
 vi.mock('@/components/atlas/AtlasShell', () => ({
   AtlasShell: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -86,6 +87,10 @@ vi.mock('@/hooks/world/useSystems', () => ({
   useWorldSystems: (...args: unknown[]) => mockUseWorldSystems(...args),
 }))
 
+vi.mock('@/hooks/world/useEntityChanges', () => ({
+  usePendingEntityChanges: (...args: unknown[]) => mockUsePendingEntityChanges(...args),
+}))
+
 function LocationProbe() {
   const location = useLocation()
   return <div data-testid="location-search">{location.search}</div>
@@ -140,6 +145,24 @@ describe('NovelAtlasPage', () => {
     mockUseWorldSystems.mockReturnValue({
       data: [],
     })
+    mockUsePendingEntityChanges.mockReturnValue({ data: [] })
+  })
+
+  it('shows an entity-tab dot when chapter updates are waiting for review', () => {
+    mockUsePendingEntityChanges.mockReturnValue({
+      data: [{ id: 1, entity_id: 9 }],
+    })
+
+    renderWithShell(
+      <Routes>
+        <Route element={<NovelShell />}>
+          <Route path="/world/:novelId" element={<NovelAtlasPage />} />
+        </Route>
+      </Routes>,
+      '/world/7?tab=entities&entity=9',
+    )
+
+    expect(screen.getByTestId('entity-change-tab-dot')).toBeInTheDocument()
   })
 
   afterEach(() => {

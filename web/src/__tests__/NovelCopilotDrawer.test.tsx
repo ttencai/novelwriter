@@ -434,6 +434,7 @@ describe('NovelCopilotDrawer', () => {
 
       expect(await screen.findByText('补完 苏瑶 的设定锚点', {}, { timeout: 3000 })).toBeTruthy()
       expect(screen.getByText('补充 苏瑶 的别名或属性')).toBeTruthy()
+      expect(screen.getAllByText('修改').length).toBeGreaterThan(0)
       expect(screen.getByText('研究过程')).toBeTruthy()
       expect(screen.getByText('1 步检索 · 1 条依据')).toBeTruthy()
       expect(screen.queryByText('搜索「苏瑶」')).toBeNull()

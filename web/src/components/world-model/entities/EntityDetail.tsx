@@ -8,12 +8,15 @@ import { AttributeRow } from '@/components/world-model/entities/AttributeRow'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { GlassSurface } from '@/components/ui/glass-surface'
 import { useWorldEntity, useUpdateEntity, useDeleteEntity, useCreateAttribute, useReorderAttributes } from '@/hooks/world/useEntities'
-import type { WorldEntityAttribute } from '@/types/api'
+import { useApplyEntityChange, usePendingEntityChanges, useRejectEntityChange } from '@/hooks/world/useEntityChanges'
+import type { WorldEntityAttribute, WorldEntityChangeProposal } from '@/types/api'
 import type { CopilotContextStage } from '@/types/copilot'
 import { useNovelCopilot } from '@/components/novel-copilot/NovelCopilotContext'
 import { buildCurrentEntityCopilotLaunchArgs } from '@/components/novel-copilot/novelCopilotLauncher'
 import { useUiLocale } from '@/contexts/UiLocaleContext'
+import { LABELS } from '@/constants/labels'
 import { Sparkles } from 'lucide-react'
+import { useToast } from '@/components/world-model/shared/useToast'
 
 function SortableAttributeRow({ novelId, entityId, attribute }: {
   novelId: number
@@ -38,7 +41,7 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
   copilotSurface?: 'studio' | 'atlas'
   copilotStage?: CopilotContextStage
 }) {
-  const { t } = useUiLocale()
+  const { locale, t } = useUiLocale()
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showTypeDropdown, setShowTypeDropdown] = useState(false)
   const [customType, setCustomType] = useState('')
@@ -46,10 +49,14 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
   const [newAlias, setNewAlias] = useState('')
 
   const { data: entity } = useWorldEntity(novelId, entityId)
+  const { data: pendingChanges = [] } = usePendingEntityChanges(novelId)
   const updateEntity = useUpdateEntity(novelId)
   const deleteEntity = useDeleteEntity(novelId)
   const createAttr = useCreateAttribute(novelId, entityId ?? 0)
   const reorderAttrs = useReorderAttributes(novelId, entityId ?? 0)
+  const applyChange = useApplyEntityChange(novelId)
+  const rejectChange = useRejectEntityChange(novelId)
+  const { toast } = useToast()
   const copilot = useNovelCopilot()
 
   if (!entityId || !entity) {
@@ -94,6 +101,19 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
   } as const
 
   const aliases = entity.aliases ?? []
+  const entityChanges = pendingChanges.filter(change => change.entity_id === entityId)
+
+  const handleApplyChange = (proposal: WorldEntityChangeProposal) => {
+    applyChange.mutate(proposal.id, {
+      onError: () => toast(t('worldModel.entityChange.actionFailed')),
+    })
+  }
+
+  const handleRejectChange = (proposal: WorldEntityChangeProposal) => {
+    rejectChange.mutate(proposal.id, {
+      onError: () => toast(t('worldModel.entityChange.actionFailed')),
+    })
+  }
 
   const handleAddAlias = () => {
     const value = newAlias.trim()
@@ -130,7 +150,7 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
                   className="text-xs px-2 py-0.5 rounded-full border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] text-muted-foreground hover:bg-[var(--nw-glass-bg-hover)] transition-colors"
                   onClick={() => setShowTypeDropdown(!showTypeDropdown)}
                 >
-                  {entity.entity_type}
+                  {LABELS.ENTITY_TYPE_LABEL(entity.entity_type, locale)}
                 </button>
                 {showTypeDropdown && (
                   <>
@@ -139,9 +159,9 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
                       variant="floating"
                       className="absolute top-full left-0 mt-1 z-20 rounded-xl py-1 min-w-[160px]"
                     >
-                      {COMMON_TYPES.map(t => (
-                        <button key={t} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--nw-glass-bg-hover)]" onClick={() => handleTypeSelect(t)}>
-                          {t}
+                      {COMMON_TYPES.map(entityType => (
+                        <button key={entityType} className="block w-full text-left px-3 py-1.5 text-sm hover:bg-[var(--nw-glass-bg-hover)]" onClick={() => handleTypeSelect(entityType)}>
+                          {LABELS.ENTITY_TYPE_LABEL(entityType, locale)}
                         </button>
                       ))}
                       <div className="h-px bg-[var(--nw-glass-border)] mx-3 my-1" />
@@ -199,6 +219,85 @@ export function EntityDetail({ novelId, entityId, onDeleted, allowDelete = true,
             </div>
           ) : null}
         </div>
+
+        {entityChanges.length > 0 ? (
+          <div className="mt-4 space-y-3" data-testid="entity-change-list">
+            {entityChanges.map(proposal => (
+              <div
+                key={proposal.id}
+                className="rounded-xl border border-[hsl(var(--color-danger)/0.35)] bg-[hsl(var(--color-danger)/0.05)] p-4"
+                data-testid={`entity-change-card-${proposal.id}`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-medium text-foreground">{t('worldModel.entityChange.title')}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {t('worldModel.entityChange.chapter', { chapter: proposal.chapter_number })}
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-[hsl(var(--color-danger)/0.12)] px-2 py-0.5 text-xs text-[hsl(var(--color-danger))]">
+                    {t('worldModel.entityChange.pending')}
+                  </span>
+                </div>
+
+                <p className="mt-3 text-sm leading-6 text-foreground/90">{proposal.summary}</p>
+
+                {(proposal.delta.attributes ?? []).length > 0 ? (
+                  <div className="mt-3 space-y-2">
+                    {(proposal.delta.attributes ?? []).map((item, index) => (
+                      <div key={`${item.key}-${index}`} className="rounded-lg border border-[var(--nw-glass-border)] bg-[var(--nw-glass-bg)] px-3 py-2 text-xs">
+                        <div className="font-medium text-foreground">{item.key}</div>
+                        <div className="mt-1 text-muted-foreground">
+                          {item.mode === 'append'
+                            ? t('worldModel.entityChange.appendValue', { value: item.new_value })
+                            : t('worldModel.entityChange.replaceValue', {
+                              old: item.old_value || t('worldModel.common.none'),
+                              value: item.new_value,
+                            })}
+                        </div>
+                        <div className="mt-1 text-muted-foreground/75">{item.evidence}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {(proposal.delta.aliases ?? []).length > 0 ? (
+                  <div className="mt-3 text-xs text-muted-foreground">
+                    {t('worldModel.common.aliases')}：{(proposal.delta.aliases ?? []).join('、')}
+                  </div>
+                ) : null}
+                {proposal.delta.description_append ? (
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    {t('worldModel.entityChange.descriptionAppend', { value: proposal.delta.description_append })}
+                  </div>
+                ) : null}
+
+                <blockquote className="mt-3 border-l-2 border-[hsl(var(--color-danger)/0.45)] pl-3 text-xs leading-5 text-muted-foreground">
+                  {proposal.evidence}
+                </blockquote>
+
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="h-9 rounded-lg border border-[var(--nw-glass-border)] px-4 text-sm text-muted-foreground transition-colors hover:bg-[var(--nw-glass-bg-hover)] hover:text-foreground disabled:opacity-50"
+                    onClick={() => handleRejectChange(proposal)}
+                    disabled={applyChange.isPending || rejectChange.isPending}
+                  >
+                    {t('worldModel.entityChange.reject')}
+                  </button>
+                  <button
+                    type="button"
+                    className="h-9 rounded-lg bg-accent px-4 text-sm text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+                    onClick={() => handleApplyChange(proposal)}
+                    disabled={applyChange.isPending || rejectChange.isPending}
+                  >
+                    {t('worldModel.entityChange.apply')}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         {/* Description */}
         <div className="mt-4">

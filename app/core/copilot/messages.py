@@ -17,6 +17,11 @@ from app.language import DEFAULT_LANGUAGE, get_language_fallback_chain
 
 class CopilotTextKey(str, Enum):
     RUN_FAILED = "run_failed"
+    RUN_FAILED_RATE_LIMIT = "run_failed_rate_limit"
+    RUN_FAILED_CONNECTION = "run_failed_connection"
+    RUN_FAILED_SERVICE = "run_failed_service"
+    RUN_FAILED_CONFIGURATION = "run_failed_configuration"
+    RUN_FAILED_REQUEST = "run_failed_request"
     RUN_INTERRUPTED = "run_interrupted"
     RUN_RESEARCHING = "run_researching"
 
@@ -98,6 +103,7 @@ class CopilotTextKey(str, Enum):
 
     SUGGESTION_SYNTH_ENTITY_TITLE = "suggestion_synth_entity_title"
     SUGGESTION_SYNTH_ENTITY_SUMMARY = "suggestion_synth_entity_summary"
+    SUGGESTION_EXISTING_ENTITY_UPDATE_TITLE = "suggestion_existing_entity_update_title"
     SUGGESTION_FALLBACK_TITLE = "suggestion_fallback_title"
     SUGGESTION_REASON_STALE = "suggestion_reason_stale"
     SUGGESTION_REASON_DRAFT_ONLY = "suggestion_reason_draft_only"
@@ -146,6 +152,11 @@ def get_copilot_text(
 
 _ZH: dict[CopilotTextKey, str] = {
     CopilotTextKey.RUN_FAILED: "Copilot 本轮运行失败，请稍后重试。",
+    CopilotTextKey.RUN_FAILED_RATE_LIMIT: "模型服务当前请求较多，本轮未完成，请稍后重试。",
+    CopilotTextKey.RUN_FAILED_CONNECTION: "模型服务连接不稳定，本轮未完成，请重新尝试。",
+    CopilotTextKey.RUN_FAILED_SERVICE: "模型服务暂时不可用，本轮未完成，请稍后重试。",
+    CopilotTextKey.RUN_FAILED_CONFIGURATION: "当前模型连接配置不可用，请检查设置后重试。",
+    CopilotTextKey.RUN_FAILED_REQUEST: "当前模型无法处理这次研究请求，请更换模型后重试。",
     CopilotTextKey.RUN_INTERRUPTED: "本轮 Copilot 失去了后台活跃租约，请稍后重试。",
     CopilotTextKey.RUN_RESEARCHING: "正在研究，等待模型决定是否调用工具...",
 
@@ -227,6 +238,7 @@ _ZH: dict[CopilotTextKey, str] = {
 
     CopilotTextKey.SUGGESTION_SYNTH_ENTITY_TITLE: "补入关联实体「{entity_name}」",
     CopilotTextKey.SUGGESTION_SYNTH_ENTITY_SUMMARY: "为关系建议补入缺失实体「{entity_name}」。",
+    CopilotTextKey.SUGGESTION_EXISTING_ENTITY_UPDATE_TITLE: "修改「{entity_name}」",
     CopilotTextKey.SUGGESTION_FALLBACK_TITLE: "建议 {index}",
     CopilotTextKey.SUGGESTION_REASON_STALE: "这条建议对应的内容刚刚发生了变化，请刷新后再试一次。",
     CopilotTextKey.SUGGESTION_REASON_DRAFT_ONLY: "这一步只能直接整理待确认内容，已确认内容请到对应页面编辑。",
@@ -253,6 +265,11 @@ _ZH: dict[CopilotTextKey, str] = {
 
 _EN: dict[CopilotTextKey, str] = {
     CopilotTextKey.RUN_FAILED: "Copilot run failed. Please try again.",
+    CopilotTextKey.RUN_FAILED_RATE_LIMIT: "The model service is busy. This run did not finish; please try again shortly.",
+    CopilotTextKey.RUN_FAILED_CONNECTION: "The model service connection was unstable. Please retry this run.",
+    CopilotTextKey.RUN_FAILED_SERVICE: "The model service is temporarily unavailable. Please try again later.",
+    CopilotTextKey.RUN_FAILED_CONFIGURATION: "The current model connection settings are unavailable. Check them and try again.",
+    CopilotTextKey.RUN_FAILED_REQUEST: "The current model could not process this research request. Try another model.",
     CopilotTextKey.RUN_INTERRUPTED: "The copilot run lost its active background lease. Please try again.",
     CopilotTextKey.RUN_RESEARCHING: "Research in progress. Waiting for the model to decide whether tools are needed...",
 
@@ -334,6 +351,7 @@ _EN: dict[CopilotTextKey, str] = {
 
     CopilotTextKey.SUGGESTION_SYNTH_ENTITY_TITLE: 'Add related entity "{entity_name}"',
     CopilotTextKey.SUGGESTION_SYNTH_ENTITY_SUMMARY: 'Add the missing entity "{entity_name}" so the relationship suggestion can be applied.',
+    CopilotTextKey.SUGGESTION_EXISTING_ENTITY_UPDATE_TITLE: 'Update "{entity_name}"',
     CopilotTextKey.SUGGESTION_FALLBACK_TITLE: "Suggestion {index}",
     CopilotTextKey.SUGGESTION_REASON_STALE: "This suggestion is stale because the underlying content just changed. Refresh and try again.",
     CopilotTextKey.SUGGESTION_REASON_DRAFT_ONLY: "This step can only tidy draft content directly. Edit confirmed content from its main page instead.",
@@ -360,8 +378,14 @@ _EN: dict[CopilotTextKey, str] = {
 
 _JA: dict[CopilotTextKey, str] = {
     CopilotTextKey.RUN_FAILED: "Copilot の実行に失敗しました。しばらくしてからもう一度お試しください。",
+    CopilotTextKey.RUN_FAILED_RATE_LIMIT: "モデルサービスが混み合っています。しばらくしてからもう一度お試しください。",
+    CopilotTextKey.RUN_FAILED_CONNECTION: "モデルサービスへの接続が不安定でした。もう一度お試しください。",
+    CopilotTextKey.RUN_FAILED_SERVICE: "モデルサービスは一時的に利用できません。しばらくしてからもう一度お試しください。",
+    CopilotTextKey.RUN_FAILED_CONFIGURATION: "現在のモデル接続設定を利用できません。設定を確認してもう一度お試しください。",
+    CopilotTextKey.RUN_FAILED_REQUEST: "現在のモデルではこの調査リクエストを処理できません。別のモデルをお試しください。",
     CopilotTextKey.RUN_INTERRUPTED: "Copilot の実行でバックグラウンドのアクティブリースが失われました。もう一度お試しください。",
     CopilotTextKey.RUN_RESEARCHING: "調査中です。モデルがツールを使うかどうか判断するのを待っています...",
+    CopilotTextKey.SUGGESTION_EXISTING_ENTITY_UPDATE_TITLE: "「{entity_name}」を更新",
 
     CopilotTextKey.TRACE_EMPTY_QUERY: "（空のクエリ）",
     CopilotTextKey.TRACE_RETRIEVAL_STEP_INCOMPLETE: "取得ステップは完了しませんでした：{error}",
@@ -393,8 +417,14 @@ _JA: dict[CopilotTextKey, str] = {
 
 _KO: dict[CopilotTextKey, str] = {
     CopilotTextKey.RUN_FAILED: "Copilot 실행에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+    CopilotTextKey.RUN_FAILED_RATE_LIMIT: "모델 서비스 요청이 많습니다. 잠시 후 다시 시도해 주세요.",
+    CopilotTextKey.RUN_FAILED_CONNECTION: "모델 서비스 연결이 불안정했습니다. 다시 시도해 주세요.",
+    CopilotTextKey.RUN_FAILED_SERVICE: "모델 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+    CopilotTextKey.RUN_FAILED_CONFIGURATION: "현재 모델 연결 설정을 사용할 수 없습니다. 설정을 확인한 뒤 다시 시도해 주세요.",
+    CopilotTextKey.RUN_FAILED_REQUEST: "현재 모델이 이 조사 요청을 처리하지 못했습니다. 다른 모델을 사용해 주세요.",
     CopilotTextKey.RUN_INTERRUPTED: "Copilot 실행에서 백그라운드 활성 리스가 끊어졌습니다. 다시 시도해 주세요.",
     CopilotTextKey.RUN_RESEARCHING: "조사 중입니다. 모델이 도구를 사용할지 결정하는 중입니다...",
+    CopilotTextKey.SUGGESTION_EXISTING_ENTITY_UPDATE_TITLE: '"{entity_name}" 수정',
 
     CopilotTextKey.TRACE_EMPTY_QUERY: "(빈 쿼리)",
     CopilotTextKey.TRACE_RETRIEVAL_STEP_INCOMPLETE: "검색 단계가 완료되지 않았습니다: {error}",

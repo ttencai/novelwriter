@@ -27,6 +27,8 @@ DEFAULT_LOCALE = DEFAULT_LANGUAGE
 class PromptKey(str, Enum):
     SYSTEM = "system"
     CONTINUATION = "continuation"
+    DRAFT_POLISH_SYSTEM = "draft_polish_system"
+    DRAFT_POLISH = "draft_polish"
     OUTLINE = "outline"
     WORLD_GEN_SYSTEM = "world_gen_system"
     WORLD_GEN = "world_gen"

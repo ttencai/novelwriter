@@ -22,6 +22,7 @@ from app.models import (
     Chapter,
     Continuation,
     Novel,
+    Outline,
     WorldEntity,
     WorldRelationship,
     WorldSystem,
@@ -457,6 +458,75 @@ class TestContinueEndpoint:
         prompt_used = str(captured.get("prompt") or "")
         assert "<world_knowledge>" in prompt_used
         assert "云澈" in prompt_used
+
+    def test_polish_mode_requires_draft(self, client, novel):
+        c, _ = client
+
+        resp = c.post(
+            f"/api/novels/{novel.id}/continue",
+            json={"mode": "polish", "prompt": "   "},
+        )
+
+        assert resp.status_code == 422
+
+    def test_polish_mode_uses_draft_prompt_without_outline(self, client, db, novel):
+        c, captured = client
+        db.add(
+            Outline(
+                novel_id=novel.id,
+                chapter_start=50,
+                chapter_end=60,
+                outline_text="无关的未来大战剧情",
+            )
+        )
+        db.commit()
+
+        draft = "要求：删掉重复句。草稿：楚月仙放下茶盏，又重复说了一遍。"
+        resp = c.post(
+            f"/api/novels/{novel.id}/continue",
+            json={"mode": "polish", "prompt": draft, "target_chars": 2000},
+        )
+
+        assert resp.status_code == 200
+        prompt_used = str(captured.get("prompt") or "")
+        system_prompt = str(captured.get("system_prompt") or "")
+        assert "<draft_and_instructions>" in prompt_used
+        assert draft in prompt_used
+        assert "<style_reference>" in prompt_used
+        assert "无关的未来大战剧情" not in prompt_used
+        assert "请续写第3章" not in prompt_used
+        assert "正文润色编辑" in system_prompt
+        assert "【长度纪律】" in system_prompt
+
+    def test_stream_polish_mode_reaches_stream_prompt(self, client, novel):
+        c, captured = client
+        draft = "草稿：楚月仙抬眼看他。要求：语气更自然。"
+
+        resp = c.post(
+            f"/api/novels/{novel.id}/continue/stream",
+            json={"mode": "polish", "prompt": draft, "context_chapters": 2},
+        )
+
+        assert resp.status_code == 200
+        assert draft in str(captured.get("stream_prompt") or "")
+        assert "正文润色编辑" in str(captured.get("stream_system_prompt") or "")
+
+    def test_polish_mode_uses_selected_target_length(self, client, novel, monkeypatch):
+        c, _ = client
+        import app.core.generator as generator_mod
+
+        async def fake_generate(**kwargs) -> str:
+            del kwargs
+            return "甲" * 1500 + "。"
+
+        monkeypatch.setattr(generator_mod.ai_client, "generate", fake_generate)
+        resp = c.post(
+            f"/api/novels/{novel.id}/continue",
+            json={"mode": "polish", "prompt": "草稿正文", "target_chars": 1000},
+        )
+
+        assert resp.status_code == 200
+        assert len(resp.json()["continuations"][0]["content"]) <= 1000
 
     def test_context_chapters_uses_requested_value(self, client, db, novel):
         c, _captured = client

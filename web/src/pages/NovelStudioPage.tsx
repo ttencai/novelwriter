@@ -19,6 +19,7 @@ import { useUpdateChapter } from '@/hooks/novel/useUpdateChapter'
 import { useCreateChapter } from '@/hooks/novel/useCreateChapter'
 import { useDeleteChapter } from '@/hooks/novel/useDeleteChapter'
 import { useWorldEntities } from '@/hooks/world/useEntities'
+import { usePendingEntityChanges } from '@/hooks/world/useEntityChanges'
 import { useWorldSystems } from '@/hooks/world/useSystems'
 import { useBootstrapStatus, useTriggerBootstrap } from '@/hooks/world/useBootstrap'
 import { WorldGenerationDialog } from '@/components/world-model/shared/WorldGenerationDialog'
@@ -133,6 +134,7 @@ export function NovelStudioPage() {
   const [bootstrapError, setBootstrapError] = useState<string | null>(null)
 
   const { data: worldEntities = [], isLoading: worldEntitiesLoading } = useWorldEntities(novelId)
+  const { data: pendingEntityChanges = [] } = usePendingEntityChanges(novelId)
   const { data: worldSystems = [], isLoading: worldSystemsLoading } = useWorldSystems(novelId)
   const { data: bootstrapJob, isLoading: bootstrapLoading } = useBootstrapStatus(novelId)
   const triggerBootstrap = useTriggerBootstrap(novelId)
@@ -145,6 +147,10 @@ export function NovelStudioPage() {
   const effectiveStudioEntityName = effectiveStudioEntityId === null
     ? null
     : worldEntities.find((entity) => entity.id === effectiveStudioEntityId)?.name ?? null
+  const hasAtlasUpdates = pendingEntityChanges.length > 0 || worldEntities.some((entity) => (
+    entity.status === 'draft'
+    && ['character', '角色', '人物'].includes((entity.entity_type || '').trim().toLowerCase())
+  ))
   const selectedStudioSystemStillExists = (
     routeState.systemId !== null && worldSystems.some((system) => system.id === routeState.systemId)
   )
@@ -729,6 +735,7 @@ export function NovelStudioPage() {
                 setShowMoreActions(false)
                 navigateToAtlas()
               }}
+              hasAtlasUpdates={hasAtlasUpdates}
               activeStage={activeStage}
             />
           </NovelShellRail>
@@ -767,6 +774,8 @@ export function NovelStudioPage() {
                 chapterReference={latestChapterReference}
                 instruction={continuationState.instruction}
                 onInstructionChange={continuationState.setInstruction}
+                mode={continuationState.mode}
+                onModeChange={continuationState.setMode}
                 selectedLength={continuationState.selectedLength}
                 onSelectedLengthChange={continuationState.setSelectedLength}
                 advancedOpen={continuationState.advancedOpen}

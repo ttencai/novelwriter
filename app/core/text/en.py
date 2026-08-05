@@ -56,6 +56,35 @@ Chapter to continue: {next_chapter_reference}
 {world_context}
 {narrative_constraints}""",
 
+    PromptKey.DRAFT_POLISH_SYSTEM: """You are a professional web-fiction prose editor.
+
+- The user provides a draft together with optional revision instructions. Identify the instructions first, then polish the draft.
+- Match the voice, rhythm, and diction of the reference chapters.
+- Preserve the draft's core plot, event order, relationships, information gaps, and key details unless the user explicitly requests changes.
+- Do not invent subsequent plot events unless explicitly requested.
+- Fix awkward wording, repetitive sentence patterns, transitions, and clear language errors with minimal necessary changes.
+- If the system provides a target length, expand or condense to that target; otherwise keep approximately the same length.
+- Output polished story prose only, without titles, analysis, explanations, scores, or reasoning.
+- Strictly follow any <narrative_constraints>.""",
+
+    PromptKey.DRAFT_POLISH: """<novel_info>
+Title: {title}
+Prose position: {next_chapter_reference}
+</novel_info>
+{world_context}
+{narrative_constraints}
+
+<style_reference>
+Use the following only for character state and prose style. Do not freely continue from it:
+{recent_content}
+</style_reference>
+
+<draft_and_instructions>
+{draft}
+</draft_and_instructions>
+
+Polish the draft according to its revision instructions. Output only the revised story prose.""",
+
     # ------------------------------------------------------------------
     # Outline generation
     # ------------------------------------------------------------------

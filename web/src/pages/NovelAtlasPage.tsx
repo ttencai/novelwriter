@@ -32,6 +32,7 @@ import {
   type AtlasWorkbenchTab,
 } from '@/components/novel-shell/NovelShellRouteState'
 import { useWorldEntities } from '@/hooks/world/useEntities'
+import { usePendingEntityChanges } from '@/hooks/world/useEntityChanges'
 import { useWorldSystems } from '@/hooks/world/useSystems'
 import { LABELS } from '@/constants/labels'
 import { NovelCopilotDrawer } from '@/components/novel-copilot/NovelCopilotDrawer'
@@ -98,6 +99,7 @@ export function NovelAtlasPage() {
     return () => observer.disconnect()
   }, [closeCopilot, copilotIsOpen, drawerWidth, setDrawerWidth])
   const { data: entities = [] } = useWorldEntities(nid)
+  const { data: pendingEntityChanges = [] } = usePendingEntityChanges(nid)
   const { data: systems = [] } = useWorldSystems(nid)
   const selectedEntityId = routeState.entityId
   const selectedSystemId = routeState.systemId
@@ -221,7 +223,17 @@ export function NovelAtlasPage() {
                       {LABELS.TAB_SYSTEMS}
                     </TabsTrigger>
                     <TabsTrigger value="entities" className="rounded-none border-b-2 border-transparent text-muted-foreground hover:text-foreground/70 data-[state=active]:border-accent data-[state=active]:text-foreground data-[state=active]:bg-transparent px-1 h-full" data-testid="tab-entities">
-                      {LABELS.TAB_ENTITIES}
+                      <span className="inline-flex items-center gap-1.5">
+                        {LABELS.TAB_ENTITIES}
+                        {pendingEntityChanges.length > 0 ? (
+                          <span
+                            className="h-2 w-2 rounded-full bg-[hsl(var(--color-danger))]"
+                            title={t('worldModel.entityChange.pendingCount', { count: pendingEntityChanges.length })}
+                            aria-label={t('worldModel.entityChange.pendingCount', { count: pendingEntityChanges.length })}
+                            data-testid="entity-change-tab-dot"
+                          />
+                        ) : null}
+                      </span>
                     </TabsTrigger>
                     <TabsTrigger value="relationships" className="rounded-none border-b-2 border-transparent text-muted-foreground hover:text-foreground/70 data-[state=active]:border-accent data-[state=active]:text-foreground data-[state=active]:bg-transparent px-1 h-full" data-testid="tab-relationships">
                       {LABELS.TAB_RELATIONSHIPS}

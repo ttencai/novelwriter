@@ -13,6 +13,7 @@ import type {
   QuotaResponse,
   WorldEntity,
   WorldEntityDetail,
+  WorldEntityChangeProposal,
   WorldEntityAttribute,
   WorldRelationship,
   WorldSystem,
@@ -137,6 +138,7 @@ export const api = {
   createChapter: (novelId: number, data: ChapterCreateRequest) =>
     request<Chapter>(`/api/novels/${novelId}/chapters`, {
       method: 'POST',
+      headers: data.detect_entity_changes ? llmHeaders() : undefined,
       body: JSON.stringify(data),
     }),
   updateChapter: (novelId: number, num: number, data: ChapterUpdateRequest) =>
@@ -296,6 +298,30 @@ export const worldApi = {
     fetchJson<BatchConfirmResponse>(`${BASE_URL}/api/novels/${novelId}/world/entities/confirm`, 'POST', { ids }),
   rejectEntities: (novelId: number, ids: number[]) =>
     fetchJson<{ rejected: number }>(`${BASE_URL}/api/novels/${novelId}/world/entities/reject`, 'POST', { ids }),
+  listEntityChanges: (
+    novelId: number,
+    params?: { status?: 'pending' | 'applied' | 'rejected'; entity_id?: number },
+  ) => {
+    const q = new URLSearchParams()
+    if (params?.status) q.set('status', params.status)
+    if (params?.entity_id != null) q.set('entity_id', String(params.entity_id))
+    const qs = q.toString()
+    return authFetch<WorldEntityChangeProposal[]>(
+      `${BASE_URL}/api/novels/${novelId}/world/entity-changes${qs ? `?${qs}` : ''}`,
+    )
+  },
+  applyEntityChange: (novelId: number, proposalId: number) =>
+    fetchJson<WorldEntityChangeProposal>(
+      `${BASE_URL}/api/novels/${novelId}/world/entity-changes/${proposalId}/apply`,
+      'POST',
+      {},
+    ),
+  rejectEntityChange: (novelId: number, proposalId: number) =>
+    fetchJson<WorldEntityChangeProposal>(
+      `${BASE_URL}/api/novels/${novelId}/world/entity-changes/${proposalId}/reject`,
+      'POST',
+      {},
+    ),
 
   // Attributes
   createAttribute: (novelId: number, entityId: number, data: CreateAttributeRequest) =>

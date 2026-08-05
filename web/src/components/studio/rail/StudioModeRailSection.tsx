@@ -9,11 +9,13 @@ export function StudioModeRailSection({
   latestChapterReference,
   onContinuation,
   onOpenAtlas,
+  hasAtlasUpdates = false,
 }: {
   activeStage: NovelShellStage | null
   latestChapterReference: string | null
   onContinuation: () => void
   onOpenAtlas: () => void
+  hasAtlasUpdates?: boolean
 }) {
   const { t } = useUiLocale()
 
@@ -51,10 +53,18 @@ export function StudioModeRailSection({
           type="button"
           onClick={onOpenAtlas}
           className={cn(
-            'w-full rounded-[14px] border border-[var(--nw-glass-border)] bg-background/15 px-3 py-3 text-left transition-all',
+            'relative w-full rounded-[14px] border border-[var(--nw-glass-border)] bg-background/15 px-3 py-3 text-left transition-all',
             'flex items-start gap-3 text-foreground/85 hover:bg-foreground/5',
           )}
         >
+          {hasAtlasUpdates ? (
+            <span
+              className="absolute right-2.5 top-2.5 h-2.5 w-2.5 rounded-full bg-[hsl(var(--color-danger))] shadow-[0_0_8px_hsl(var(--color-danger)/0.65)]"
+              title={t('studio.rail.atlasUpdatesPending')}
+              aria-label={t('studio.rail.atlasUpdatesPending')}
+              data-testid="studio-rail-atlas-update-dot"
+            />
+          ) : null}
           <Globe size={16} className="mt-0.5 shrink-0" />
           <div className="min-w-0">
             <div className="text-[13px] font-medium">{t('studio.rail.atlasTitle')}</div>

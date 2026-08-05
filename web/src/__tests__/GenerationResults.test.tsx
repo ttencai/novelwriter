@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
@@ -52,6 +53,7 @@ vi.mock('@/services/api', () => ({
 import { api } from '@/services/api'
 
 const mockGetContinuations = api.getContinuations as ReturnType<typeof vi.fn>
+const mockCreateChapter = api.createChapter as ReturnType<typeof vi.fn>
 
 function LocationProbe() {
   const location = useLocation()
@@ -76,6 +78,17 @@ describe('GenerationResults compatibility', () => {
         created_at: '2026-03-03T00:00:00Z',
       },
     ])
+    mockCreateChapter.mockResolvedValue({
+      id: 88,
+      novel_id: 7,
+      chapter_number: 4,
+      title: '',
+      source_chapter_label: null,
+      source_chapter_number: null,
+      content: '已持久化的续写结果',
+      created_at: '2026-03-03T00:00:00Z',
+      updated_at: null,
+    })
   })
 
   it('redirects the legacy results route into the studio-host results stage', async () => {
@@ -138,5 +151,43 @@ describe('GenerationResults compatibility', () => {
     ).toBe(false)
 
     consoleErrorSpy.mockRestore()
+  })
+
+  it('requests incremental character detection when adopting a continuation', async () => {
+    const user = userEvent.setup()
+    const queryClient = createTestQueryClient()
+
+    render(
+      <UiLocaleProvider>
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter initialEntries={['/novel/7?stage=results&chapter=3&continuations=0:101&total_variants=1']}>
+            <Routes>
+              <Route
+                path="/novel/:novelId"
+                element={(
+                  <ContinuationResultsStage
+                    novelId={7}
+                    activeChapterNum={3}
+                    showInjectionSummaryRail={false}
+                    onToggleInjectionSummaryRail={vi.fn()}
+                    onDebugChange={vi.fn()}
+                  />
+                )}
+              />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      </UiLocaleProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('results-adopt-button')).toBeEnabled())
+    await user.click(screen.getByTestId('results-adopt-button'))
+
+    await waitFor(() => {
+      expect(mockCreateChapter).toHaveBeenCalledWith(7, expect.objectContaining({
+        content: '已持久化的续写结果',
+        detect_entity_changes: true,
+      }))
+    })
   })
 })

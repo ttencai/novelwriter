@@ -449,6 +449,23 @@ class TestInviteRegistration:
         assert patch_resp.status_code == 200
         assert patch_resp.json()["preferences"]["context_chapters"] == 99
 
+    def test_preferences_store_supported_continuation_mode(self, hosted_client):
+        resp = hosted_client.post("/api/auth/invite", json={
+            "invite_code": "TEST-CODE-123",
+            "nickname": "续写模式测试",
+        })
+        token = resp.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        patch_resp = hosted_client.patch(
+            "/api/auth/preferences",
+            json={"preferences": {"continuation_mode": "polish"}},
+            headers=headers,
+        )
+
+        assert patch_resp.status_code == 200
+        assert patch_resp.json()["preferences"]["continuation_mode"] == "polish"
+
 
 class TestQuota:
     def test_quota_endpoint(self, hosted_client):

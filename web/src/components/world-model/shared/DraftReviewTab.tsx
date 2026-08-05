@@ -8,6 +8,7 @@ import { useWorldRelationships, useConfirmRelationships, useRejectRelationships 
 import { useWorldSystems, useConfirmSystems, useRejectSystems } from '@/hooks/world/useSystems'
 import { useUiLocale } from '@/contexts/UiLocaleContext'
 import { getSystemDisplayTypeLabel } from '@/lib/worldSystemDisplay'
+import { LABELS } from '@/constants/labels'
 import type { WorldEntity, WorldRelationship, WorldSystem } from '@/types/api'
 
 type ReviewKind = 'entities' | 'relationships' | 'systems'
@@ -302,14 +303,14 @@ function EntityDraftCard({
   onReject: () => void
   onOpen: () => void
 }) {
-  const { t } = useUiLocale()
+  const { locale, t } = useUiLocale()
   return (
     <CardShell id={`draft-entities-${entity.id}`} highlighted={highlighted}>
       <div className="flex items-start gap-4">
         <div className="flex-1 min-w-0 space-y-1">
           <div className="flex items-center gap-2">
             <div className="text-sm font-semibold truncate">{entity.name}</div>
-            <span className="text-xs text-muted-foreground">{entity.entity_type}</span>
+            <span className="text-xs text-muted-foreground">{LABELS.ENTITY_TYPE_LABEL(entity.entity_type, locale)}</span>
             <span className="text-xs text-[hsl(var(--color-status-draft))]">● draft</span>
           </div>
           {entity.description ? (

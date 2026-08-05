@@ -17,8 +17,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.copilot.messages import CopilotTextKey, get_copilot_text
+from app.core.world.character_attributes import (
+    MAX_AUTO_EXTENSION_ATTRIBUTES,
+    MAX_AUTO_CHARACTER_ATTRIBUTES,
+    append_bounded_history,
+    canonicalize_character_attribute_key,
+    count_extension_character_attributes,
+    is_core_character_attribute,
+    is_history_character_attribute,
+)
 from app.core.world.crud import WorldCrudError
-from app.models import CopilotRun, WorldEntity, WorldRelationship, WorldSystem
+from app.models import CopilotRun, WorldEntity, WorldEntityAttribute, WorldRelationship, WorldSystem
 from app.schemas import (
     WorldAttributeCreate,
     WorldAttributeUpdate,
@@ -338,6 +347,25 @@ def _execute_apply_action(
 
     if action_type == "create_entity":
         validated = WorldEntityCreate.model_validate(data)
+        existing_entity = _find_existing_entity_for_create(db, novel_id, validated.name)
+        if existing_entity is not None:
+            # 兼容已经生成的旧建议：采纳时发现角色存在，就把建议内容合并到原角色。
+            validated_data = validated.model_dump()
+            update_data = {
+                key: validated_data[key]
+                for key in ("entity_type", "description", "aliases")
+                if key in data
+            }
+            if update_data:
+                world_crud.stage_update_entity(novel_id, existing_entity.id, update_data, db)
+            _upsert_deferred_attributes(
+                db,
+                novel_id,
+                existing_entity.id,
+                action.get("deferred_attribute_actions", []),
+            )
+            return {"entity_id": existing_entity.id}
+
         entity = world_crud.stage_create_entity(
             novel_id,
             {
@@ -347,10 +375,14 @@ def _execute_apply_action(
             },
             db,
         )
-        for attr_action in action.get("deferred_attribute_actions", []):
-            attr_data = attr_action.get("data", {})
-            attr_validated = WorldAttributeCreate.model_validate(attr_data)
-            world_crud.stage_create_attribute(novel_id, entity.id, attr_validated.model_dump(), db)
+        deferred_actions = action.get("deferred_attribute_actions", [])
+        if (entity.entity_type or "").strip().casefold() in {"character", "角色", "人物"}:
+            _upsert_deferred_attributes(db, novel_id, entity.id, deferred_actions)
+        else:
+            for attr_action in deferred_actions:
+                attr_data = attr_action.get("data", {})
+                attr_validated = WorldAttributeCreate.model_validate(attr_data)
+                world_crud.stage_create_attribute(novel_id, entity.id, attr_validated.model_dump(), db)
         return {"entity_id": entity.id}
 
     if action_type == "update_entity":
@@ -440,6 +472,106 @@ def _execute_apply_action(
     raise _ApplyDomainError(code="unknown_apply_type", message=f"Unknown apply type: {action_type}", status_code=400)
 
 
+def _find_existing_entity_for_create(
+    db: Session,
+    novel_id: int,
+    name: str,
+) -> WorldEntity | None:
+    """Find one exact canonical-name or alias match for a create fallback."""
+
+    key = name.strip().casefold()
+    if not key:
+        return None
+
+    entities = db.query(WorldEntity).filter(WorldEntity.novel_id == novel_id).all()
+    canonical_matches = [entity for entity in entities if entity.name.strip().casefold() == key]
+    if len(canonical_matches) == 1:
+        return canonical_matches[0]
+
+    alias_matches = [
+        entity
+        for entity in entities
+        if key in {str(alias).strip().casefold() for alias in (entity.aliases or [])}
+    ]
+    return alias_matches[0] if len(alias_matches) == 1 else None
+
+
+def _upsert_deferred_attributes(
+    db: Session,
+    novel_id: int,
+    entity_id: int,
+    attribute_actions: list[dict[str, Any]],
+) -> None:
+    """Merge deferred create attributes into an entity that already exists."""
+
+    from app.core.world import crud as world_crud
+
+    existing_attributes = (
+        db.query(WorldEntityAttribute)
+        .filter(WorldEntityAttribute.entity_id == entity_id)
+        .all()
+    )
+    entity = db.query(WorldEntity).filter(WorldEntity.id == entity_id, WorldEntity.novel_id == novel_id).first()
+    is_character = bool(
+        entity and (entity.entity_type or "").strip().casefold() in {"character", "角色", "人物"}
+    )
+    existing_by_key = {
+        canonicalize_character_attribute_key(attribute.key) if is_character else attribute.key: attribute
+        for attribute in existing_attributes
+    }
+    extension_count = count_extension_character_attributes(existing_by_key) if is_character else 0
+    active_count = sum(
+        1 for key in existing_by_key
+        if not is_history_character_attribute(key)
+    ) if is_character else 0
+    seen_keys: set[str] = set()
+    for attr_action in attribute_actions:
+        attr_data = attr_action.get("data", {})
+        validated = WorldAttributeCreate.model_validate(attr_data)
+        key = canonicalize_character_attribute_key(validated.key) if is_character else validated.key
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        if is_character and not is_core_character_attribute(key) and not is_history_character_attribute(key):
+            if key not in existing_by_key and extension_count >= MAX_AUTO_EXTENSION_ATTRIBUTES:
+                continue
+            if key not in existing_by_key:
+                extension_count += 1
+        if is_character and key not in existing_by_key and not is_history_character_attribute(key):
+            if active_count >= MAX_AUTO_CHARACTER_ATTRIBUTES:
+                continue
+            active_count += 1
+
+        existing = existing_by_key.get(key)
+        if existing is None:
+            create_data = validated.model_dump()
+            create_data["key"] = key
+            created = world_crud.stage_create_attribute(
+                novel_id,
+                entity_id,
+                create_data,
+                db,
+            )
+            existing_by_key[key] = created
+            continue
+
+        surface = validated.surface
+        if is_character and is_history_character_attribute(key):
+            surface = append_bounded_history(existing.surface or "", surface)
+        update_data: dict[str, Any] = {"surface": surface}
+        if "truth" in attr_data:
+            update_data["truth"] = validated.truth
+        if "visibility" in attr_data:
+            update_data["visibility"] = validated.visibility
+        world_crud.stage_update_attribute(
+            novel_id,
+            entity_id,
+            existing.id,
+            update_data,
+            db,
+        )
+
+
 def _execute_attribute_action(db: Session, novel_id: int, attr_action: dict[str, Any]) -> None:
     """Execute a single attribute create/update sub-action."""
     from app.core.world import crud as world_crud
@@ -449,8 +581,12 @@ def _execute_attribute_action(db: Session, novel_id: int, attr_action: dict[str,
     data = attr_action.get("data", {})
 
     if action_type == "create_attribute" and entity_id:
-        validated = WorldAttributeCreate.model_validate(data)
-        world_crud.stage_create_attribute(novel_id, entity_id, validated.model_dump(), db)
+        _upsert_deferred_attributes(
+            db,
+            novel_id,
+            entity_id,
+            [{"type": "create_attribute", "data": data}],
+        )
     elif action_type == "update_attribute" and entity_id:
         attr_id = attr_action.get("attribute_id")
         if attr_id:

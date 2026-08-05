@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.indexing import (
@@ -39,6 +41,20 @@ MAX_SCOPE_ENTITIES = 80
 MAX_SCOPE_RELATIONSHIPS = 60
 MAX_SCOPE_SYSTEMS = 30
 MAX_CHAPTER_EXCERPT_CHARS = 2000
+MAX_EXPLICIT_QUERY_CHAPTERS = 6
+MAX_EXPLICIT_CHAPTER_CHARS = 6000
+MAX_EXPLICIT_ENTITY_CHAPTERS = 4
+
+_CHAPTER_RANGE_RE = re.compile(
+    r"(?:第\s*)?(\d{1,6})\s*(?:章\s*)?(?:-|—|~|～|至|到)\s*(?:第\s*)?(\d{1,6})\s*章",
+    re.IGNORECASE,
+)
+_CHAPTER_NUMBER_RE = re.compile(r"(?:第\s*)?(\d{1,6})\s*章|chapters?\s*(\d{1,6})", re.IGNORECASE)
+_WORKSPACE_QUERY_HINTS = (
+    "这本书", "本书", "书里", "文中", "正文", "章节", "剧情", "角色", "人物",
+    "主角", "女主", "男主", "关系", "设定", "世界模型",
+    "chapter", "character", "relationship", "current novel", "the novel",
+)
 
 
 def _scope_text(
@@ -78,6 +94,9 @@ class ScopeSnapshot:
     focus_variant: str = "whole_book"
     focus_entity_id: int | None = None
     window_index_state: WindowIndexLifecycleSnapshot | None = None
+    # 完整实体目录只用于重名识别和采纳校验，不会扩大传给模型的工作集。
+    entity_catalog: list[WorldEntity] = field(default_factory=list)
+    entity_catalog_by_id: dict[int, WorldEntity] = field(default_factory=dict)
 
 
 @dataclass
@@ -324,21 +343,38 @@ def load_scope_snapshot(db: Session, novel: Novel, mode: str, scope: str, contex
         focus_entity_id = None
 
     if profile == "draft_governance":
-        return _load_draft_governance_snapshot(db, novel, window_index_state=window_index_state)
-    if profile == "focused_research":
-        return _load_focused_research_snapshot(
+        snapshot = _load_draft_governance_snapshot(db, novel, window_index_state=window_index_state)
+    elif profile == "focused_research":
+        snapshot = _load_focused_research_snapshot(
             db,
             novel,
             focus_variant=focus_variant,
             focus_entity_id=focus_entity_id,
             window_index_state=window_index_state,
         )
-    return _load_broad_exploration_snapshot(
-        db,
-        novel,
-        focus_variant=focus_variant,
-        window_index_state=window_index_state,
+    else:
+        snapshot = _load_broad_exploration_snapshot(
+            db,
+            novel,
+            focus_variant=focus_variant,
+            window_index_state=window_index_state,
+        )
+
+    # 补充全书实体索引，防止局部研究时把工作集外的已有角色误判成新角色。
+    snapshot.entity_catalog = (
+        db.query(WorldEntity)
+        .filter(WorldEntity.novel_id == novel.id)
+        .all()
     )
+    snapshot.entity_catalog_by_id = {
+        entity.id: entity for entity in snapshot.entity_catalog
+    }
+    catalog_attributes = _load_attributes_for_entities(
+        db,
+        [entity.id for entity in snapshot.entity_catalog],
+    )
+    snapshot.attributes_by_entity.update(catalog_attributes)
+    return snapshot
 
 
 def gather_evidence(
@@ -361,6 +397,275 @@ def gather_evidence(
         _gather_relationship_evidence(snapshot, context, items, interaction_locale)
 
     return items[:MAX_EVIDENCE_ITEMS]
+
+
+def prompt_may_reference_workspace(prompt: str) -> bool:
+    """快速判断普通对话是否可能在查询当前小说。"""
+    if _CHAPTER_RANGE_RE.search(prompt or "") or _CHAPTER_NUMBER_RE.search(prompt or ""):
+        return True
+    lowered = (prompt or "").casefold()
+    if any(hint in lowered for hint in _WORKSPACE_QUERY_HINTS):
+        return True
+    # “角色名 + 状态/身份/是谁”等短问法通常省略“书里”二字。
+    return bool(re.search(r"[\u4e00-\u9fff]{2,8}(?:是谁|什么身份|什么状态|现在怎么样|有何关系)", prompt or ""))
+
+
+def prompt_mentions_known_entity(db: Session, novel_id: int, prompt: str) -> bool:
+    """即使用户省略“书里”，明确出现实体名时也应读取小说资料。"""
+    lowered = (prompt or "").casefold()
+    entities = db.query(WorldEntity).filter(WorldEntity.novel_id == novel_id).all()
+    for entity in entities:
+        for name in [entity.name, *(entity.aliases or [])]:
+            term = str(name or "").strip().casefold()
+            if len(term) >= 2 and term in lowered:
+                return True
+    return False
+
+
+def gather_explicit_query_evidence(
+    db: Session,
+    novel: Novel,
+    snapshot: ScopeSnapshot,
+    prompt: str,
+    interaction_locale: str = "zh",
+) -> list[EvidenceItem]:
+    """按用户明确提到的章节或实体读取证据，不扩大到整部正文。"""
+    items: list[EvidenceItem] = []
+    chapter_numbers, chapter_range_truncated = _extract_requested_chapter_numbers(prompt)
+    if chapter_numbers:
+        found_chapters = _gather_requested_chapters(db, novel, chapter_numbers, items, interaction_locale)
+        missing_chapters = [number for number in chapter_numbers if number not in found_chapters]
+        if missing_chapters:
+            items.append(EvidenceItem(
+                evidence_id="explicit_chapter_missing",
+                source_type="system_notice",
+                source_ref={"missing_chapters": missing_chapters},
+                title="章节缺失提示",
+                excerpt=f"未找到这些章节：{', '.join(str(number) for number in missing_chapters)}。",
+                why_relevant="避免把缺失章节当成已经读取",
+            ))
+        if chapter_range_truncated:
+            items.append(EvidenceItem(
+                evidence_id="explicit_chapter_limit",
+                source_type="system_notice",
+                source_ref={"chapter_limit": MAX_EXPLICIT_QUERY_CHAPTERS},
+                title="章节读取范围提示",
+                excerpt=f"本轮最多读取{MAX_EXPLICIT_QUERY_CHAPTERS}个明确指定章节，超出部分未加载。",
+                why_relevant="避免一次请求载入过多正文",
+            ))
+
+    mentioned_entities = _find_prompt_entities(snapshot, prompt)
+    for entity in mentioned_entities:
+        _gather_entity_evidence(snapshot, {"entity_id": entity.id}, items, interaction_locale)
+        _gather_relationship_evidence(snapshot, {"entity_id": entity.id}, items, interaction_locale)
+    if mentioned_entities:
+        _gather_entity_chapter_evidence(
+            db,
+            novel,
+            mentioned_entities,
+            items,
+            excluded_chapter_numbers=set(chapter_numbers),
+            interaction_locale=interaction_locale,
+        )
+
+    if not items and prompt_may_reference_workspace(prompt):
+        overview = _build_query_overview(snapshot)
+        if overview:
+            items.append(EvidenceItem(
+                evidence_id="explicit_world_overview",
+                source_type="world_overview",
+                source_ref={"novel_id": novel.id},
+                title="当前小说概览",
+                excerpt=overview,
+                why_relevant="用户明确查询当前小说内容",
+            ))
+    for item in items:
+        item.source_ref = {**item.source_ref, "explicit_query": True}
+    return _dedupe_evidence(items)[:MAX_EVIDENCE_ITEMS]
+
+
+def _extract_requested_chapter_numbers(prompt: str) -> tuple[list[int], bool]:
+    requested: set[int] = set()
+    truncated = False
+    for match in _CHAPTER_RANGE_RE.finditer(prompt or ""):
+        start = int(match.group(1))
+        end = int(match.group(2))
+        if start <= 0 or end <= 0:
+            continue
+        step = 1 if end >= start else -1
+        values = list(range(start, end + step, step))
+        if len(values) > MAX_EXPLICIT_QUERY_CHAPTERS:
+            truncated = True
+        requested.update(values[:MAX_EXPLICIT_QUERY_CHAPTERS])
+    for match in _CHAPTER_NUMBER_RE.finditer(prompt or ""):
+        value = int(match.group(1) or match.group(2))
+        if value > 0:
+            requested.add(value)
+    ordered = sorted(requested)
+    if len(ordered) > MAX_EXPLICIT_QUERY_CHAPTERS:
+        truncated = True
+        ordered = ordered[:MAX_EXPLICIT_QUERY_CHAPTERS]
+    return ordered, truncated
+
+
+def _gather_requested_chapters(
+    db: Session,
+    novel: Novel,
+    chapter_numbers: list[int],
+    items: list[EvidenceItem],
+    interaction_locale: str,
+) -> set[int]:
+    chapters = (
+        db.query(Chapter)
+        .filter(Chapter.novel_id == novel.id, Chapter.chapter_number.in_(chapter_numbers))
+        .order_by(Chapter.chapter_number.asc())
+        .all()
+    )
+    found: set[int] = set()
+    for chapter in chapters:
+        if not (chapter.content or "").strip():
+            continue
+        found.add(chapter.chapter_number)
+        content = _clip_explicit_chapter(chapter.content)
+        items.append(EvidenceItem(
+            evidence_id=f"explicit_chapter_{chapter.id}",
+            source_type="chapter_excerpt",
+            source_ref={
+                "chapter_id": chapter.id,
+                "chapter_number": chapter.chapter_number,
+                "start_pos": 0,
+                "end_pos": len(chapter.content),
+                "explicit_query": True,
+            },
+            title=f"第{chapter.chapter_number}章 {chapter.title or ''}".strip(),
+            excerpt=content,
+            why_relevant=(
+                "用户明确指定该章节" if interaction_locale != "en"
+                else "The user explicitly requested this chapter"
+            ),
+        ))
+    return found
+
+
+def _clip_explicit_chapter(content: str) -> str:
+    if len(content) <= MAX_EXPLICIT_CHAPTER_CHARS:
+        return content
+    half = MAX_EXPLICIT_CHAPTER_CHARS // 2
+    return f"{content[:half]}\n\n……中段因长度限制省略……\n\n{content[-half:]}"
+
+
+def _find_prompt_entities(snapshot: ScopeSnapshot, prompt: str) -> list[WorldEntity]:
+    lowered = (prompt or "").casefold()
+    catalog = snapshot.entity_catalog or snapshot.entities
+    term_to_entities: dict[str, list[WorldEntity]] = {}
+    for entity in catalog:
+        for name in [entity.name, *(entity.aliases or [])]:
+            term = str(name or "").strip().casefold()
+            if len(term) >= 2 and term in lowered:
+                term_to_entities.setdefault(term, []).append(entity)
+
+    selected: list[WorldEntity] = []
+    selected_ids: set[int] = set()
+    for term in sorted(term_to_entities, key=lambda value: (-len(value), value)):
+        matches = {entity.id: entity for entity in term_to_entities[term]}
+        if len(matches) != 1:
+            continue
+        entity = next(iter(matches.values()))
+        if entity.id not in selected_ids:
+            selected.append(entity)
+            selected_ids.add(entity.id)
+        if len(selected) >= 3:
+            break
+    return selected
+
+
+def _gather_entity_chapter_evidence(
+    db: Session,
+    novel: Novel,
+    entities: list[WorldEntity],
+    items: list[EvidenceItem],
+    *,
+    excluded_chapter_numbers: set[int],
+    interaction_locale: str,
+) -> None:
+    terms = [entity.name for entity in entities if entity.name]
+    if not terms:
+        return
+    chapters = (
+        db.query(Chapter)
+        .filter(Chapter.novel_id == novel.id, or_(*(Chapter.content.contains(term) for term in terms)))
+        .order_by(Chapter.chapter_number.desc())
+        .limit(30)
+        .all()
+    )
+    scored = sorted(
+        chapters,
+        key=lambda chapter: (
+            -sum(1 for term in terms if term in (chapter.content or "")),
+            -chapter.chapter_number,
+        ),
+    )
+    added = 0
+    for chapter in scored:
+        if chapter.chapter_number in excluded_chapter_numbers or not chapter.content:
+            continue
+        excerpt, start, end = _excerpt_around_terms(chapter.content, terms)
+        items.append(EvidenceItem(
+            evidence_id=f"entity_query_chapter_{chapter.id}_{start}",
+            source_type="chapter_excerpt",
+            source_ref={
+                "chapter_id": chapter.id,
+                "chapter_number": chapter.chapter_number,
+                "start_pos": start,
+                "end_pos": end,
+                "explicit_query": True,
+            },
+            title=f"第{chapter.chapter_number}章相关片段",
+            excerpt=excerpt,
+            why_relevant=(
+                "正文提到了用户查询的角色" if interaction_locale != "en"
+                else "The prose mentions the queried character"
+            ),
+        ))
+        added += 1
+        if added >= MAX_EXPLICIT_ENTITY_CHAPTERS:
+            break
+
+
+def _excerpt_around_terms(content: str, terms: list[str]) -> tuple[str, int, int]:
+    positions = [content.find(term) for term in terms if content.find(term) >= 0]
+    center = min(positions) if positions else 0
+    start = max(0, center - 1000)
+    end = min(len(content), start + 3000)
+    return content[start:end], start, end
+
+
+def _build_query_overview(snapshot: ScopeSnapshot) -> str:
+    entities = "、".join(entity.name for entity in snapshot.entities[:30])
+    relationships: list[str] = []
+    for relationship in snapshot.relationships[:20]:
+        source = snapshot.entities_by_id.get(relationship.source_id)
+        target = snapshot.entities_by_id.get(relationship.target_id)
+        relationships.append(
+            f"{source.name if source else '?'}—{relationship.label}→{target.name if target else '?'}"
+        )
+    parts = []
+    if entities:
+        parts.append(f"实体：{entities}")
+    if relationships:
+        parts.append(f"关系：{'；'.join(relationships)}")
+    return "\n".join(parts)
+
+
+def _dedupe_evidence(items: list[EvidenceItem]) -> list[EvidenceItem]:
+    deduped: list[EvidenceItem] = []
+    seen: set[str] = set()
+    for item in items:
+        if item.evidence_id in seen:
+            continue
+        seen.add(item.evidence_id)
+        deduped.append(item)
+    return deduped
 
 
 def _gather_chapter_evidence(

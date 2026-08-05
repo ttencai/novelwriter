@@ -82,6 +82,7 @@ export interface ChapterCreateRequest {
   chapter_number?: number
   title?: string
   content?: string
+  detect_entity_changes?: boolean
 }
 
 export interface ChapterUpdateRequest {
@@ -89,7 +90,10 @@ export interface ChapterUpdateRequest {
   content?: string
 }
 
+export type ContinuationMode = 'continue' | 'polish'
+
 export interface ContinueRequest {
+  mode?: ContinuationMode
   num_versions?: number
   prompt?: string
   max_tokens?: number
@@ -194,6 +198,33 @@ export interface WorldEntityAttribute {
 
 export interface WorldEntityDetail extends WorldEntity {
   attributes: WorldEntityAttribute[]
+}
+
+export interface WorldEntityAttributeChange {
+  key: string
+  old_value: string
+  new_value: string
+  mode: 'replace' | 'append'
+  evidence: string
+}
+
+export interface WorldEntityChangeProposal {
+  id: number
+  novel_id: number
+  chapter_id: number
+  chapter_number: number
+  entity_id: number
+  entity_name: string
+  summary: string
+  evidence: string
+  delta: {
+    aliases?: string[]
+    description_append?: string
+    attributes?: WorldEntityAttributeChange[]
+  }
+  status: 'pending' | 'applied' | 'rejected'
+  created_at: string
+  updated_at: string
 }
 
 export interface WorldRelationship {
@@ -391,6 +422,7 @@ export interface QuotaResponse {
 }
 
 export interface UserPreferences {
+  continuation_mode?: ContinuationMode
   num_versions?: number
   temperature?: number
   context_chapters?: number

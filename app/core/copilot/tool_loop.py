@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.ai_client import AIClient, ToolCall
 from app.core.copilot.scope import EvidenceItem, ScopeSnapshot
+from app.core.copilot.lease import await_with_run_lease_heartbeat
 from app.core.copilot.workspace import (
     Workspace,
     deserialize_tool_call,
@@ -203,6 +204,22 @@ async def run_tool_loop(
         if deps.should_preload_world_context(turn_intent):
             auto_preload = deps.build_auto_preload(snapshot, session_data["interaction_locale"])
             user_content = f"{prompt}\n\n---\n[Auto-preloaded world model summary]\n{auto_preload}"
+        # 明确指定的章节或角色证据必须在首轮可见，不能只依赖模型主动调用检索工具。
+        explicit_evidence = [
+            item
+            for item in evidence
+            if isinstance(item.source_ref, dict) and item.source_ref.get("explicit_query")
+        ]
+        if explicit_evidence:
+            evidence_text = "\n\n".join(
+                f"[Evidence#{index}] {item.title}\n{item.excerpt}"
+                for index, item in enumerate(explicit_evidence, 1)
+            )
+            user_content = (
+                f"{user_content}\n\n---\n"
+                "[Evidence explicitly requested by the user]\n"
+                f"{evidence_text}"
+            )
         messages = [{"role": "system", "content": system_prompt}]
         if prior_messages:
             messages.extend(prior_messages)
@@ -234,19 +251,29 @@ async def run_tool_loop(
         workspace.round_count = rounds_used + round_idx + 1
         _ensure_run_lease(deps, db_factory, run_id=run_id, worker_id=worker_id)
 
-        await deps.acquire_llm_slot()
-        try:
-            response = await client.generate_with_tools(
-                messages=messages,
-                tools=deps.tool_schemas,
-                max_tokens=4000,
-                temperature=0.4,
-                role="default",
-                user_id=user_id,
-                **llm_kwargs,
-            )
-        finally:
-            deps.release_llm_slot()
+        async def call_model():
+            await deps.acquire_llm_slot()
+            try:
+                return await client.generate_with_tools(
+                    messages=messages,
+                    tools=deps.tool_schemas,
+                    max_tokens=4000,
+                    temperature=0.4,
+                    role="default",
+                    user_id=user_id,
+                    **llm_kwargs,
+                )
+            finally:
+                deps.release_llm_slot()
+
+        response = await await_with_run_lease_heartbeat(
+            call_model(),
+            db_factory=db_factory,
+            run_id=run_id,
+            worker_id=worker_id,
+            renew_run_lease=deps.renew_run_lease,
+            lease_lost_error_factory=deps.lease_lost_error_factory,
+        )
 
         _ensure_run_lease(deps, db_factory, run_id=run_id, worker_id=worker_id)
 
@@ -289,20 +316,30 @@ async def run_tool_loop(
         )
 
     _ensure_run_lease(deps, db_factory, run_id=run_id, worker_id=worker_id)
-    await deps.acquire_llm_slot()
-    try:
-        response = await client.generate_with_tools(
-            messages=messages,
-            tools=deps.tool_schemas,
-            max_tokens=4000,
-            temperature=0.4,
-            role="default",
-            user_id=user_id,
-            tool_choice="none",
-            **llm_kwargs,
-        )
-    finally:
-        deps.release_llm_slot()
+    async def call_final_model():
+        await deps.acquire_llm_slot()
+        try:
+            return await client.generate_with_tools(
+                messages=messages,
+                tools=deps.tool_schemas,
+                max_tokens=4000,
+                temperature=0.4,
+                role="default",
+                user_id=user_id,
+                tool_choice="none",
+                **llm_kwargs,
+            )
+        finally:
+            deps.release_llm_slot()
+
+    response = await await_with_run_lease_heartbeat(
+        call_final_model(),
+        db_factory=db_factory,
+        run_id=run_id,
+        worker_id=worker_id,
+        renew_run_lease=deps.renew_run_lease,
+        lease_lost_error_factory=deps.lease_lost_error_factory,
+    )
 
     _ensure_run_lease(deps, db_factory, run_id=run_id, worker_id=worker_id)
 

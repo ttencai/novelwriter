@@ -131,6 +131,7 @@ class ChapterCreateRequest(BaseModel):
     chapter_number: int | None = None  # default: smallest missing positive chapter number
     title: str = ""
     content: str = ""
+    detect_entity_changes: bool = Field(default=False, description="是否分析本章人物增量变化")
 
 
 class OutlineResponse(BaseModel):
@@ -156,8 +157,10 @@ class ContinuationResponse(BaseModel):
 
 
 class ContinueRequest(BaseModel):
+    # continue follows recent chapters; polish treats prompt as draft plus revision instructions.
+    mode: Literal["continue", "polish"] = Field(default="continue", description="续写处理方式")
     num_versions: int = Field(default=1, ge=1, le=2)
-    prompt: str | None = Field(default=None, max_length=20_000, description="用户续写指令")
+    prompt: str | None = Field(default=None, max_length=20_000, description="续写指令，或偏润色模式的草稿与要求")
     max_tokens: int | None = Field(default=None, ge=100, le=16000, description="生成的最大 token 数")
     target_chars: int | None = Field(default=None, ge=1, description="Target continuation length in characters")
     context_chapters: int | None = Field(
@@ -171,6 +174,12 @@ class ContinueRequest(BaseModel):
         le=2.0,
         description="LLM 采样温度（0.0-2.0），默认 0.8",
     )
+
+    @model_validator(mode="after")
+    def _validate_polish_draft(self):
+        if self.mode == "polish" and not (self.prompt or "").strip():
+            raise ValueError("偏润色模式需要填写草稿与润色要求")
+        return self
 
     @model_validator(mode="after")
     def _validate_target_chars(self):
@@ -457,6 +466,23 @@ class WorldEntityResponse(BaseModel):
 
 class WorldEntityDetailResponse(WorldEntityResponse):
     attributes: List[WorldEntityAttributeResponse] = Field(default_factory=list)
+
+
+class WorldEntityChangeProposalResponse(BaseModel):
+    id: int
+    novel_id: int
+    chapter_id: int
+    chapter_number: int
+    entity_id: int
+    entity_name: str
+    summary: str
+    evidence: str
+    delta: dict[str, Any]
+    status: Literal["pending", "applied", "rejected"]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WorldAttributeCreate(BaseModel):

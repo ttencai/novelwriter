@@ -6,6 +6,7 @@ import { createElement } from 'react'
 import { RelationshipSidebarPanel } from '@/components/atlas/relationships/RelationshipSidebarPanel'
 import { NovelCopilotProvider } from '@/components/novel-copilot/NovelCopilotProvider'
 import { NovelCopilotDrawer } from '@/components/novel-copilot/NovelCopilotDrawer'
+import { NovelAssistantChatProvider } from '@/components/novel-chat/NovelAssistantChatProvider'
 import { UiLocaleProvider } from '@/contexts/UiLocaleContext'
 import { ToastProvider } from '@/components/world-model/shared/Toast'
 
@@ -56,16 +57,20 @@ function renderSection({ locale = 'zh' }: { locale?: 'zh' | 'en' } = {}) {
           ToastProvider,
           null,
           createElement(
-            NovelCopilotProvider,
-            { novelId: 1, interactionLocale: locale },
-            createElement(RelationshipSidebarPanel, {
-              novelId: 1,
-              selectedEntityId: 101,
-              selectedEntityName: '苏瑶',
-              onRequestNewRelationship: vi.fn(),
-              onOpenDraftReview: vi.fn(),
-            }),
-            createElement(NovelCopilotDrawer, { novelId: 1 }),
+          NovelCopilotProvider,
+          { novelId: 1, interactionLocale: locale },
+            createElement(
+              NovelAssistantChatProvider,
+              { novelId: 1, interactionLocale: locale, autoInitialize: false },
+              createElement(RelationshipSidebarPanel, {
+                novelId: 1,
+                selectedEntityId: 101,
+                selectedEntityName: '苏瑶',
+                onRequestNewRelationship: vi.fn(),
+                onOpenDraftReview: vi.fn(),
+              }),
+              createElement(NovelCopilotDrawer, { novelId: 1 }),
+            ),
           ),
         ),
       ),

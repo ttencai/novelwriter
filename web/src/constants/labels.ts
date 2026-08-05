@@ -112,24 +112,49 @@ export const LABELS = {
 
   // Display helpers
   ENTITY_TYPE_LABEL: (entityType: string, locale: UiLocale = currentLocale()) => {
+    const normalizedType = entityType.trim().toLowerCase()
     const table: Record<UiLocale, Record<string, string>> = {
       zh: {
-        Character: '角色',
-        Location: '地点',
-        Faction: '势力',
-        Concept: '概念',
-        Vehicle: '载具',
-        Item: '物品',
+        character: '角色',
+        location: '地点',
+        faction: '势力',
+        organization: '组织',
+        organisation: '组织',
+        concept: '概念',
+        vehicle: '载具',
+        item: '物品',
+        artifact: '物品',
+        event: '事件',
+        creature: '生物',
+        race: '种族',
+        species: '种族',
+        ability: '能力',
+        skill: '技能',
+        system: '体系',
+        rule: '规则',
+        other: '其他',
       },
       en: {
-        Character: 'Character',
-        Location: 'Location',
-        Faction: 'Faction',
-        Concept: 'Concept',
-        Vehicle: 'Vehicle',
-        Item: 'Item',
+        character: 'Character',
+        location: 'Location',
+        faction: 'Faction',
+        organization: 'Organization',
+        organisation: 'Organization',
+        concept: 'Concept',
+        vehicle: 'Vehicle',
+        item: 'Item',
+        artifact: 'Item',
+        event: 'Event',
+        creature: 'Creature',
+        race: 'Race',
+        species: 'Species',
+        ability: 'Ability',
+        skill: 'Skill',
+        system: 'System',
+        rule: 'Rule',
+        other: 'Other',
       },
     }
-    return table[locale][entityType] ?? entityType
+    return table[locale][normalizedType] ?? entityType
   },
 } as const

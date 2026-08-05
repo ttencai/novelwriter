@@ -372,7 +372,11 @@ export function ContinuationResultsStage({
   const handleAdopt = useCallback(() => {
     if (!currentContent) return
     createChapter.mutate(
-      { content: currentContent, chapter_number: (latestChapterNum ?? 0) + 1 },
+      {
+        content: currentContent,
+        chapter_number: (latestChapterNum ?? 0) + 1,
+        detect_entity_changes: true,
+      },
       {
         onSuccess: (chapter) => {
           const currentDebug = isStreamMode ? streamDebug : legacyResponse?.debug ?? persistedDebug ?? scopedStudioResultsDebug

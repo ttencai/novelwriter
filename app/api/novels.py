@@ -59,6 +59,7 @@ from app.core.generator import continue_novel, continue_novel_stream
 from app.core.ai_client import ai_client
 from app.core.skills import load_common_novel_writing_skill
 from app.core.chapter_numbering import get_next_missing_chapter_number
+from app.core.world.entity_change_detection import run_entity_change_detection_background
 from app.core.indexing.lifecycle import (
     WindowIndexLifecycleSnapshot,
     enqueue_window_index_rebuild_job,
@@ -172,6 +173,26 @@ def _schedule_window_index_rebuild(
         run_window_index_rebuild_for_latest_revision,
         novel_id,
         session_factory=background_session_factory,
+    )
+
+
+def _schedule_entity_change_detection(
+    background_tasks: BackgroundTasks,
+    *,
+    req: ChapterCreateRequest,
+    chapter: Chapter,
+    current_user: User,
+    llm_config: dict[str, Any] | None,
+) -> None:
+    # Only chapters adopted from generated text request this extra model call.
+    if not req.detect_entity_changes or not (chapter.content or "").strip():
+        return
+    background_tasks.add_task(
+        run_entity_change_detection_background,
+        chapter.novel_id,
+        chapter.id,
+        current_user.id,
+        llm_config,
     )
 
 
@@ -862,6 +883,7 @@ def create_chapter(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user_or_default),
+    llm_config: dict[str, Any] | None = Depends(get_llm_config),
 ):
     """Create a new chapter for a novel."""
     novel = db.query(Novel).filter(Novel.id == novel_id).first()
@@ -908,6 +930,13 @@ def create_chapter(
                 )
 
             db.refresh(chapter)
+            _schedule_entity_change_detection(
+                background_tasks,
+                req=req,
+                chapter=chapter,
+                current_user=current_user,
+                llm_config=llm_config,
+            )
             _schedule_window_index_rebuild(
                 background_tasks,
                 db=db,
@@ -950,6 +979,13 @@ def create_chapter(
         raise HTTPException(status_code=409, detail=f"Chapter {chapter_number} already exists")
 
     db.refresh(chapter)
+    _schedule_entity_change_detection(
+        background_tasks,
+        req=req,
+        chapter=chapter,
+        current_user=current_user,
+        llm_config=llm_config,
+    )
     _schedule_window_index_rebuild(
         background_tasks,
         db=db,
@@ -1080,6 +1116,7 @@ async def continue_novel_endpoint(
             llm_config=llm_config,
             temperature=req.temperature,
             user_id=current_user.id,
+            generation_mode=req.mode,
         )
         quota.charge(len(continuations or []))
     except ValueError as e:
@@ -1173,6 +1210,7 @@ async def continue_novel_stream_endpoint(
                 request_id=request_id,
                 temperature=req.temperature,
                 user_id=current_user.id,
+                generation_mode=req.mode,
                 ):
                 if event.get("type") == "start":
                     try:
@@ -1460,6 +1498,7 @@ def delete_novel(novel_id: int, db: Session = Depends(get_db), current_user: Use
     # best-effort cleanup for legacy tables that still exist in some DBs.
     #
     # Order matters when FK enforcement is enabled: delete dependents first.
+    _safe_delete_where(db, table="world_entity_change_proposals", where_sql="novel_id = :novel_id", params={"novel_id": novel_id})
     _safe_delete_where(db, table="world_relationships", where_sql="novel_id = :novel_id", params={"novel_id": novel_id})
     _safe_delete_where(db, table="world_entity_attributes", where_sql="entity_id IN (SELECT id FROM world_entities WHERE novel_id = :novel_id)", params={"novel_id": novel_id})
     _safe_delete_where(db, table="world_entities", where_sql="novel_id = :novel_id", params={"novel_id": novel_id})

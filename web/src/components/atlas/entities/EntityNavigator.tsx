@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { useWorldEntities, useCreateEntity, useConfirmEntities, useRejectEntities } from '@/hooks/world/useEntities'
+import { usePendingEntityChanges } from '@/hooks/world/useEntityChanges'
 import { LABELS } from '@/constants/labels'
 import { useUiLocale } from '@/contexts/UiLocaleContext'
 import type { WorldEntity } from '@/types/api'
@@ -17,6 +18,7 @@ export function EntityNavigator({ novelId, selectedEntityId, onSelectEntity, bot
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<Set<string>>(new Set())
   const { data: entities = [], isLoading } = useWorldEntities(novelId)
+  const { data: pendingChanges = [] } = usePendingEntityChanges(novelId)
   const createEntity = useCreateEntity(novelId)
   const confirmEntities = useConfirmEntities(novelId)
   const rejectEntities = useRejectEntities(novelId)
@@ -48,6 +50,10 @@ export function EntityNavigator({ novelId, selectedEntityId, onSelectEntity, bot
   }, [entities, search, typeFilter])
 
   const draftIds = useMemo(() => filtered.filter(e => e.status === 'draft').map(e => e.id), [filtered])
+  const changedEntityIds = useMemo(
+    () => new Set(pendingChanges.map(change => change.entity_id)),
+    [pendingChanges],
+  )
 
   useEffect(() => {
     if (selectedEntityId === null) return
@@ -97,7 +103,7 @@ export function EntityNavigator({ novelId, selectedEntityId, onSelectEntity, bot
                     : 'border-[var(--nw-glass-border)] text-muted-foreground hover:bg-[var(--nw-glass-bg-hover)]'
                 )}
               >
-                {t}
+                {LABELS.ENTITY_TYPE_LABEL(t, locale)}
               </button>
             ))}
           </div>
@@ -127,6 +133,7 @@ export function EntityNavigator({ novelId, selectedEntityId, onSelectEntity, bot
             entity={e}
             locale={locale}
             selected={e.id === selectedEntityId}
+            hasPendingChange={changedEntityIds.has(e.id)}
             onClick={() => onSelectEntity(e.id)}
             onConfirm={e.status === 'draft' ? () => handleConfirmOne(e.id) : undefined}
             onReject={e.status === 'draft' ? () => handleRejectOne(e.id) : undefined}
@@ -148,10 +155,11 @@ export function EntityNavigator({ novelId, selectedEntityId, onSelectEntity, bot
   )
 }
 
-function EntityRow({ entity, locale, selected, onClick, onConfirm, onReject }: {
+function EntityRow({ entity, locale, selected, hasPendingChange, onClick, onConfirm, onReject }: {
   entity: WorldEntity
   locale: 'zh' | 'en'
   selected: boolean
+  hasPendingChange: boolean
   onClick: () => void
   onConfirm?: () => void
   onReject?: () => void
@@ -181,6 +189,14 @@ function EntityRow({ entity, locale, selected, onClick, onConfirm, onReject }: {
     >
       {isDraft && (
         <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--color-status-draft))] shrink-0" />
+      )}
+      {hasPendingChange && (
+        <span
+          className="h-2 w-2 shrink-0 rounded-full bg-[hsl(var(--color-danger))]"
+          title={t('worldModel.entityChange.pending')}
+          aria-label={t('worldModel.entityChange.pending')}
+          data-testid={`entity-change-dot-${entity.id}`}
+        />
       )}
       <span className="truncate flex-1 text-foreground">{entity.name}</span>
       {isDraft && (onConfirm || onReject) ? (

@@ -283,6 +283,35 @@ class WorldEntityAttribute(Base):
     entity = relationship("WorldEntity", back_populates="attributes")
 
 
+class WorldEntityChangeProposal(Base):
+    """A chapter-sourced entity change waiting for explicit user approval."""
+
+    __tablename__ = "world_entity_change_proposals"
+    __table_args__ = (
+        UniqueConstraint("novel_id", "fingerprint", name="uq_world_entity_change_novel_fingerprint"),
+        Index("ix_world_entity_change_novel_status", "novel_id", "status"),
+        Index("ix_world_entity_change_entity_status", "entity_id", "status"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment="主键")
+    novel_id = Column(Integer, ForeignKey("novels.id", ondelete="CASCADE"), nullable=False, comment="所属小说")
+    chapter_id = Column(Integer, ForeignKey("chapters.id", ondelete="CASCADE"), nullable=False, comment="来源章节")
+    chapter_number = Column(Integer, nullable=False, comment="来源章节编号")
+    entity_id = Column(Integer, ForeignKey("world_entities.id", ondelete="CASCADE"), nullable=False, comment="待更新实体")
+    entity_name = Column(String(255), nullable=False, comment="实体名称快照")
+    summary = Column(Text, nullable=False, default="", comment="变更摘要")
+    evidence = Column(Text, nullable=False, default="", comment="章节证据")
+    delta = Column(JSON, nullable=False, default=dict, comment="结构化变更内容")
+    fingerprint = Column(String(64), nullable=False, comment="去重指纹")
+    status = Column(String(20), nullable=False, default="pending", comment="pending/applied/rejected")
+    created_at = Column(DateTime, server_default=func.now(), comment="创建时间")
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
+
+    novel = relationship("Novel")
+    chapter = relationship("Chapter")
+    entity = relationship("WorldEntity")
+
+
 class WorldRelationship(Base):
     __tablename__ = "world_relationships"
     __table_args__ = (

@@ -47,6 +47,18 @@ def init_db():
     from app.config import get_settings
 
     settings = get_settings()
+    if settings.deploy_mode == "selfhost":
+        # Local databases may predate Alembic tracking; recover and apply additive migrations on startup.
+        from app.selfhost_db_bootstrap import ensure_selfhost_database_ready
+
+        ensure_selfhost_database_ready(
+            db_engine=engine,
+            metadata=Base.metadata,
+            db_url=DATABASE_URL,
+            ini_path=Path(__file__).parent.parent / "alembic.ini",
+        )
+        return
+
     if not settings.db_auto_create:
         try:
             inspector = inspect(engine)

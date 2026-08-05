@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import sqlalchemy as sa
@@ -45,6 +46,22 @@ def test_bootstraps_fresh_database_and_stamps_head(sqlite_engine):
     assert "novels" in inspector.get_table_names()
     assert "world_entity_attributes" in inspector.get_table_names()
     assert calls == [("stamp", "head")]
+
+
+def test_init_db_runs_selfhost_migrations(monkeypatch):
+    import app.config as config
+    import app.database as database
+    import app.selfhost_db_bootstrap as bootstrap
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(config, "get_settings", lambda: SimpleNamespace(deploy_mode="selfhost"))
+    monkeypatch.setattr(bootstrap, "ensure_selfhost_database_ready", lambda **kwargs: calls.append(kwargs))
+
+    database.init_db()
+
+    assert len(calls) == 1
+    assert calls[0]["db_engine"] is database.engine
+    assert calls[0]["metadata"] is database.Base.metadata
 
 
 def test_resets_partial_bootstrap_before_creating_current_schema(sqlite_engine):
@@ -158,6 +175,25 @@ def test_auto_upgrades_unversioned_schema_missing_only_derived_asset_jobs(sqlite
 
     assert result == "upgraded"
     assert calls == [("stamp", "029"), ("upgrade", "head")]
+
+
+def test_auto_upgrades_unversioned_schema_missing_only_entity_changes(sqlite_engine):
+    engine, db_url = sqlite_engine
+    Base.metadata.create_all(bind=engine)
+    with engine.begin() as conn:
+        conn.execute(sa.text("DROP TABLE world_entity_change_proposals"))
+
+    calls: list[tuple[str, str]] = []
+    result = ensure_selfhost_database_ready(
+        db_engine=engine,
+        metadata=Base.metadata,
+        db_url=db_url,
+        stamp_fn=lambda _config, revision: calls.append(("stamp", revision)),
+        upgrade_fn=lambda _config, revision: calls.append(("upgrade", revision)),
+    )
+
+    assert result == "upgraded"
+    assert calls == [("stamp", "032"), ("upgrade", "head")]
 
 
 def test_matches_unversioned_baseline_for_chapter_source_metadata():

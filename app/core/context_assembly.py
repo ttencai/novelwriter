@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.language_policy import LanguagePolicy, get_language_policy
 from app.models import Novel, WorldEntity, WorldRelationship, WorldSystem
+from app.core.world.character_attributes import filter_character_attributes_for_writer
 from app.world_visibility import VIS_ACTIVE, VIS_HIDDEN, VIS_REFERENCE
 
 logger = logging.getLogger(__name__)
@@ -412,6 +413,8 @@ def assemble_writer_context(db: Session, novel_id: int, chapter_text: str) -> Di
                         "sort_order": int(attr.sort_order or 0),
                     }
                 )
+            if (entity.entity_type or "").strip().casefold() in {"character", "角色", "人物"}:
+                attrs = filter_character_attributes_for_writer(attrs, chapter_text=chapter_text)
 
             entities_out.append(
                 {

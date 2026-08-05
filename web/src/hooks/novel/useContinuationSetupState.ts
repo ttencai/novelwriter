@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { api } from '@/services/api'
 import { setStudioResultsStageSearchParams } from '@/components/novel-shell/NovelShellRouteState'
+import type { ContinuationMode, ContinueRequest } from '@/types/api'
 
 // ── Constants ──
 
@@ -63,6 +64,7 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
   const { user } = useAuth()
 
   const [instruction, setInstruction] = useState('')
+  const [mode, setMode] = useState<ContinuationMode>('continue')
   const [selectedLength, setSelectedLength] = useState('4000')
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [contextChapters, setContextChapters] = useState(String(DEFAULT_CONTEXT_CHAPTERS))
@@ -79,8 +81,11 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
     if (previousNovelIdRef.current === novelId) return
     previousNovelIdRef.current = novelId
     demoDefaultApplied.current = false
-    setInstruction('')
-    setAdvancedOpen(false)
+    // Defer local form resets so the effect does not trigger a synchronous render cascade.
+    queueMicrotask(() => {
+      setInstruction('')
+      setAdvancedOpen(false)
+    })
   }, [novelId])
 
   // Load user preferences as defaults (once)
@@ -89,6 +94,9 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
     const p = user.preferences as Record<string, unknown>
     queueMicrotask(() => {
       if (p.num_versions != null) setNumVersions(String(p.num_versions))
+      if (p.continuation_mode === 'continue' || p.continuation_mode === 'polish') {
+        setMode(p.continuation_mode)
+      }
       if (p.temperature != null) setTemperature(String(p.temperature))
       if (p.context_chapters != null) {
         const next = clampInt(String(p.context_chapters), MIN_CONTEXT_CHAPTERS, Number.MAX_SAFE_INTEGER)
@@ -113,6 +121,7 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
       if (cancelled) return
       if (n.title === DEMO_NOVEL_TITLE) {
         demoDefaultApplied.current = true
+        setMode('continue')
         setInstruction(prev => prev || DEMO_DEFAULT_INSTRUCTION)
       }
     }).catch(() => {})
@@ -122,6 +131,7 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
   // Save preferences to server
   const savePrefs = useCallback(() => {
     const prefs: Record<string, unknown> = {}
+    prefs.continuation_mode = mode
     const nv = parseInt(numVersions, 10)
     if (!Number.isNaN(nv)) prefs.num_versions = Math.max(1, Math.min(2, nv))
     const temp = parseFloat(temperature)
@@ -129,12 +139,14 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
     prefs.context_chapters = clampInt(contextChapters, MIN_CONTEXT_CHAPTERS, Number.MAX_SAFE_INTEGER) ?? DEFAULT_CONTEXT_CHAPTERS
     prefs.target_chars = resolveTargetChars(selectedLength)
     api.updatePreferences(prefs).catch(() => {})
-  }, [numVersions, temperature, contextChapters, selectedLength])
+  }, [mode, numVersions, temperature, contextChapters, selectedLength])
 
   const handleGenerate = useCallback(() => {
     if (chapterNum === null) return
+    if (mode === 'polish' && !instruction.trim()) return
     const parsedTemp = parseFloat(temperature)
-    const streamParams = {
+    const streamParams: ContinueRequest = {
+      mode,
       prompt: instruction.trim() || undefined,
       target_chars: resolveTargetChars(selectedLength),
       context_chapters: clampInt(contextChapters, MIN_CONTEXT_CHAPTERS, Number.MAX_SAFE_INTEGER) ?? DEFAULT_CONTEXT_CHAPTERS,
@@ -146,11 +158,13 @@ export function useContinuationSetupState(novelId: number, chapterNum: number | 
     navigate(`/novel/${novelId}?${nextSearchParams.toString()}`, {
       state: { streamParams, novelId },
     })
-  }, [chapterNum, contextChapters, instruction, navigate, novelId, numVersions, savePrefs, selectedLength, temperature])
+  }, [chapterNum, contextChapters, instruction, mode, navigate, novelId, numVersions, savePrefs, selectedLength, temperature])
 
   return {
     instruction,
     setInstruction,
+    mode,
+    setMode,
     selectedLength,
     setSelectedLength,
     advancedOpen,

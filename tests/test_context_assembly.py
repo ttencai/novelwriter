@@ -201,6 +201,59 @@ class TestWriterContext:
         yunche_attrs = _find_entity_attrs(ctx, "云澈")
         assert _find_attr(yunche_attrs, "性格") is None
 
+    def test_character_context_excludes_history_and_limits_attributes(self, db, novel):
+        """续写只读取角色当前有效属性，不直接注入完整历史。"""
+        from app.core.context_assembly import assemble_writer_context
+        from app.models import WorldEntity, WorldEntityAttribute
+
+        entity = WorldEntity(
+            novel_id=novel.id,
+            name="林野",
+            entity_type="Character",
+            description="主角",
+            status="confirmed",
+        )
+        db.add(entity)
+        db.flush()
+        values = {
+            "身份": "调查组组长",
+            "当前身份": "旧称谓",
+            "阵营": "调查组",
+            "位置": "县城",
+            "当前状态": "调查中",
+            "身体状态": "轻伤",
+            "目标": "查清真相",
+            "动机": "保护家人",
+            "修为": "三阶",
+            "能力": "追踪",
+            "持有物": "名单",
+            "认知": "知道内鬼存在",
+            "关系状态": "与顾青合作",
+            "性格": "谨慎",
+            "价值观": "重诺",
+            "经历记录": "第2章：接手调查",
+            "成长记录": "第2章：开始信任同伴",
+            "变更记录": "第2章：身份发生变化",
+        }
+        for index, (key, value) in enumerate(values.items()):
+            db.add(WorldEntityAttribute(
+                entity_id=entity.id,
+                key=key,
+                surface=value,
+                visibility="active",
+                sort_order=index,
+            ))
+        db.commit()
+
+        ctx = assemble_writer_context(db, novel.id, chapter_text="林野继续调查")
+        attributes = _find_entity_attrs(ctx, "林野")
+        keys = {item["key"] for item in attributes}
+
+        assert len(attributes) <= 15
+        assert "身份" in keys
+        assert "当前身份" not in keys
+        assert keys.isdisjoint({"经历记录", "成长记录", "变更记录"})
+
     def test_hidden_relationship_not_injected(self, db, populated_world):
         """Hidden relationships must not appear in writer context."""
         from app.core.context_assembly import assemble_writer_context
